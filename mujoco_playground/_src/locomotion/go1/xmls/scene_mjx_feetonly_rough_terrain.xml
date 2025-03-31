@@ -1,5 +1,5 @@
 <mujoco model="go1 feet only rough terrain scene">
-  <include file="go1_mjx_feetonly.xml"/>
+  <include file="go1_mjx_fullcollisions.xml"/>
 
   <statistic center="0 0 0.1" extent="0.8" meansize="0.04"/>
 
@@ -15,7 +15,7 @@
     <!-- https://polyhaven.com/a/rock_face -->
     <texture type="2d" name="groundplane" file="assets/rocky_texture.png"/>
     <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance=".8"/>
-    <hfield name="hfield" file="assets/hfield.png" size="10 10 .05 0.1"/>
+    <hfield name="hfield" file="assets/moutainfield.png" size="10 10 .1 0.1"/>
   </asset>
 
   <worldbody>
@@ -25,14 +25,14 @@
 
   <keyframe>
     <key name="home" qpos="
-    0 0 0.35
+    0 0 0.4
     1 0 0 0
     0.1 0.9 -1.8
     -0.1 0.9 -1.8
     0.1 0.9 -1.8
     -0.1 0.9 -1.8"
       ctrl="0.1 0.9 -1.8 -0.1 0.9 -1.8 0.1 0.9 -1.8 -0.1 0.9 -1.8"/>
-    <key name="home_higher" qpos="0 0 0.35 1 0 0 0 0 0.82 -1.63 0 0.82 -1.63 0 0.82 -1.63 0 0.82 -1.63"
+    <key name="home_higher" qpos="0 0 0.4 1 0 0 0 0 0.82 -1.63 0 0.82 -1.63 0 0.82 -1.63 0 0.82 -1.63"
       ctrl="0 0.82 -1.63 0 0.82 -1.63 0 0.82 -1.63 0 0.82 -1.63"/>
   </keyframe>
 </mujoco>
