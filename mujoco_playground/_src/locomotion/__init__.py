@@ -61,20 +61,20 @@ _envs = {
     "G1JoystickFlatTerrain": functools.partial(
         g1_joystick.Joystick, task="flat_terrain"
     ),
-    "G1JoystickRoughTerrainEasy": functools.partial(
-        g1_joystick.Joystick, task="rough_terrain_easy"
+    "Go1JoystickRoughTerrain": functools.partial(
+        go1_joystick.Joystick, task="rough_terrain"
     ),
-    "G1JoystickRoughTerrainMedium": functools.partial(
-        g1_joystick.Joystick, task="rough_terrain_medium"
+    "Go1JoystickRoughTerrainEasy": functools.partial(
+        go1_joystick.Joystick, task="rough_terrain_easy"
     ),
-    "G1JoystickRoughTerrainHard": functools.partial(
-        g1_joystick.Joystick, task="rough_terrain_hard"
+    "Go1JoystickRoughTerrainMedium": functools.partial(
+        go1_joystick.Joystick, task="rough_terrain_medium"
+    ),
+    "Go1JoystickRoughTerrainHard": functools.partial(
+        go1_joystick.Joystick, task="rough_terrain_hard"
     ),
     "Go1JoystickFlatTerrain": functools.partial(
         go1_joystick.Joystick, task="flat_terrain"
-    ),
-    "Go1JoystickRoughTerrain": functools.partial(
-        go1_joystick.Joystick, task="rough_terrain"
     ),
     "Go1Getup": go1_getup.Getup,
     "Go1Handstand": go1_handstand.Handstand,
@@ -103,6 +103,9 @@ _cfgs = {
     "G1JoystickRoughTerrain": g1_joystick.default_config,
     "Go1JoystickFlatTerrain": go1_joystick.default_config,
     "Go1JoystickRoughTerrain": go1_joystick.default_config,
+    "Go1JoystickRoughTerrainEasy": go1_joystick.default_config,
+    "Go1JoystickRoughTerrainMedium": go1_joystick.default_config,
+    "Go1JoystickRoughTerrainHard": go1_joystick.default_config,
     "Go1Getup": go1_getup.default_config,
     "Go1Handstand": go1_handstand.default_config,
     "Go1Footstand": go1_handstand.default_config,
@@ -127,6 +130,9 @@ _randomizer = {
     "G1JoystickRoughTerrain": g1_randomize.domain_randomize,
     "Go1JoystickFlatTerrain": go1_randomize.domain_randomize,
     "Go1JoystickRoughTerrain": go1_randomize.domain_randomize,
+    "Go1JoystickRoughTerrainEasy": go1_randomize.domain_randomize,
+    "Go1JoystickRoughTerrainMedium": go1_randomize.domain_randomize,
+    "Go1JoystickRoughTerrainHard": go1_randomize.domain_randomize,
     "Go1Getup": go1_randomize.domain_randomize,
     "Go1Handstand": go1_randomize.domain_randomize,
     "Go1Footstand": go1_randomize.domain_randomize,

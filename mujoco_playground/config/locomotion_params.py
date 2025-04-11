@@ -47,7 +47,13 @@ def brax_ppo_config(env_name: str) -> config_dict.ConfigDict:
         ),
     )
 
-    if env_name in ("Go1JoystickFlatTerrain", "Go1JoystickRoughTerrain"):
+    if env_name in (
+        "Go1JoystickFlatTerrain",
+        "Go1JoystickRoughTerrain",
+        "Go1JoystickRoughTerrainEasy",
+        "Go1JoystickRoughTerrainMedium",
+        "Go1JoystickRoughTerrainHard",
+    ):
         rl_config.num_timesteps = 200_000_000
         rl_config.num_evals = 10
         rl_config.num_resets_per_eval = 1
@@ -91,9 +97,7 @@ def brax_ppo_config(env_name: str) -> config_dict.ConfigDict:
 
     elif env_name in (
         "G1JoystickFlatTerrain",
-        "G1JoystickRoughTerrainEasy",
-        "G1JoystickRoughTerrainMedium",
-        "G1JoystickRoughTerrainHard",
+        "G1JoystickRoughTerrain",
     ):
         rl_config.num_timesteps = 200_000_000
         rl_config.num_evals = 20
