@@ -14,11 +14,14 @@
 # ==============================================================================
 """Base classes for Go1."""
 
+import os
 from typing import Any, Dict, Optional, Union
 
 from etils import epath
 import jax
 import jax.numpy as jp
+from PIL import Image
+import numpy as np
 from ml_collections import config_dict
 import mujoco
 from mujoco import mjx
@@ -28,95 +31,117 @@ from mujoco_playground._src.locomotion.go1 import go1_constants as consts
 
 
 def get_assets() -> Dict[str, bytes]:
-  assets = {}
-  mjx_env.update_assets(assets, consts.ROOT_PATH / "xmls", "*.xml")
-  mjx_env.update_assets(assets, consts.ROOT_PATH / "xmls" / "assets")
-  path = mjx_env.MENAGERIE_PATH / "unitree_go1"
-  mjx_env.update_assets(assets, path, "*.xml")
-  mjx_env.update_assets(assets, path / "assets")
-  return assets
+    assets = {}
+    mjx_env.update_assets(assets, consts.ROOT_PATH / "xmls", "*.xml")
+    mjx_env.update_assets(assets, consts.ROOT_PATH / "xmls" / "assets")
+    path = mjx_env.MENAGERIE_PATH / "unitree_go1"
+    mjx_env.update_assets(assets, path, "*.xml")
+    mjx_env.update_assets(assets, path / "assets")
+    return assets
+
+
+def create_random_grayscale(mu=128, sigma=32, size=256, squares=8, xml_path=None):
+    # Create array for the pattern
+    pattern = np.zeros((size, size), dtype=np.uint8)
+    square_size = size // squares
+
+    # Generate random grayscale values for each square
+    for i in range(squares):
+        for j in range(squares):
+            # Random value between 0 (black) and 255 (white)
+            gray_value = int(np.clip(np.random.normal(mu, sigma), 0, 255))
+            pattern[
+                i * square_size : (i + 1) * square_size,
+                j * square_size : (j + 1) * square_size,
+            ] = gray_value
+
+    # Convert to image and save
+    img = Image.fromarray(pattern)
+    img.save(os.path.join(os.path.dirname(xml_path), "assets", "moutainfield.png"))
 
 
 class Go1Env(mjx_env.MjxEnv):
-  """Base class for Go1 environments."""
+    """Base class for Go1 environments."""
 
-  def __init__(
-      self,
-      xml_path: str,
-      config: config_dict.ConfigDict,
-      config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
-  ) -> None:
-    super().__init__(config, config_overrides)
+    def __init__(
+        self,
+        task: str,
+        xml_path: str,
+        config: config_dict.ConfigDict,
+        config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
+    ) -> None:
+        super().__init__(config, config_overrides)
 
-    self._mj_model = mujoco.MjModel.from_xml_string(
-        epath.Path(xml_path).read_text(), assets=get_assets()
-    )
-    self._mj_model.opt.timestep = self._config.sim_dt
+        if task == "rough_terrain_easy":
+            create_random_grayscale(128, 50, 256, 128, xml_path)
+        elif task == "rough_terrain_medium":
+            create_random_grayscale(128, 125, 256, 128, xml_path)
+        elif task == "rough_terrain_hard":
+            create_random_grayscale(128, 200, 256, 128, xml_path)
 
-    # Modify PD gains.
-    self._mj_model.dof_damping[6:] = config.Kd
-    self._mj_model.actuator_gainprm[:, 0] = config.Kp
-    self._mj_model.actuator_biasprm[:, 1] = -config.Kp
+        self._mj_model = mujoco.MjModel.from_xml_string(
+            epath.Path(xml_path).read_text(), assets=get_assets()
+        )
+        self._mj_model.opt.timestep = self._config.sim_dt
 
-    # Increase offscreen framebuffer size to render at higher resolutions.
-    self._mj_model.vis.global_.offwidth = 3840
-    self._mj_model.vis.global_.offheight = 2160
+        # Modify PD gains.
+        self._mj_model.dof_damping[6:] = config.Kd
+        self._mj_model.actuator_gainprm[:, 0] = config.Kp
+        self._mj_model.actuator_biasprm[:, 1] = -config.Kp
 
-    self._mjx_model = mjx.put_model(self._mj_model)
-    self._xml_path = xml_path
-    self._imu_site_id = self._mj_model.site("imu").id
+        # Increase offscreen framebuffer size to render at higher resolutions.
+        self._mj_model.vis.global_.offwidth = 3840
+        self._mj_model.vis.global_.offheight = 2160
 
-  # Sensor readings.
+        self._mjx_model = mjx.put_model(self._mj_model)
+        self._xml_path = xml_path
+        self._imu_site_id = self._mj_model.site("imu").id
 
-  def get_upvector(self, data: mjx.Data) -> jax.Array:
-    return mjx_env.get_sensor_data(self.mj_model, data, consts.UPVECTOR_SENSOR)
+    # Sensor readings.
 
-  def get_gravity(self, data: mjx.Data) -> jax.Array:
-    return data.site_xmat[self._imu_site_id].T @ jp.array([0, 0, -1])
+    def get_upvector(self, data: mjx.Data) -> jax.Array:
+        return mjx_env.get_sensor_data(self.mj_model, data, consts.UPVECTOR_SENSOR)
 
-  def get_global_linvel(self, data: mjx.Data) -> jax.Array:
-    return mjx_env.get_sensor_data(
-        self.mj_model, data, consts.GLOBAL_LINVEL_SENSOR
-    )
+    def get_gravity(self, data: mjx.Data) -> jax.Array:
+        return data.site_xmat[self._imu_site_id].T @ jp.array([0, 0, -1])
 
-  def get_global_angvel(self, data: mjx.Data) -> jax.Array:
-    return mjx_env.get_sensor_data(
-        self.mj_model, data, consts.GLOBAL_ANGVEL_SENSOR
-    )
+    def get_global_linvel(self, data: mjx.Data) -> jax.Array:
+        return mjx_env.get_sensor_data(self.mj_model, data, consts.GLOBAL_LINVEL_SENSOR)
 
-  def get_local_linvel(self, data: mjx.Data) -> jax.Array:
-    return mjx_env.get_sensor_data(
-        self.mj_model, data, consts.LOCAL_LINVEL_SENSOR
-    )
+    def get_global_angvel(self, data: mjx.Data) -> jax.Array:
+        return mjx_env.get_sensor_data(self.mj_model, data, consts.GLOBAL_ANGVEL_SENSOR)
 
-  def get_accelerometer(self, data: mjx.Data) -> jax.Array:
-    return mjx_env.get_sensor_data(
-        self.mj_model, data, consts.ACCELEROMETER_SENSOR
-    )
+    def get_local_linvel(self, data: mjx.Data) -> jax.Array:
+        return mjx_env.get_sensor_data(self.mj_model, data, consts.LOCAL_LINVEL_SENSOR)
 
-  def get_gyro(self, data: mjx.Data) -> jax.Array:
-    return mjx_env.get_sensor_data(self.mj_model, data, consts.GYRO_SENSOR)
+    def get_accelerometer(self, data: mjx.Data) -> jax.Array:
+        return mjx_env.get_sensor_data(self.mj_model, data, consts.ACCELEROMETER_SENSOR)
 
-  def get_feet_pos(self, data: mjx.Data) -> jax.Array:
-    return jp.vstack([
-        mjx_env.get_sensor_data(self.mj_model, data, sensor_name)
-        for sensor_name in consts.FEET_POS_SENSOR
-    ])
+    def get_gyro(self, data: mjx.Data) -> jax.Array:
+        return mjx_env.get_sensor_data(self.mj_model, data, consts.GYRO_SENSOR)
 
-  # Accessors.
+    def get_feet_pos(self, data: mjx.Data) -> jax.Array:
+        return jp.vstack(
+            [
+                mjx_env.get_sensor_data(self.mj_model, data, sensor_name)
+                for sensor_name in consts.FEET_POS_SENSOR
+            ]
+        )
 
-  @property
-  def xml_path(self) -> str:
-    return self._xml_path
+    # Accessors.
 
-  @property
-  def action_size(self) -> int:
-    return self._mjx_model.nu
+    @property
+    def xml_path(self) -> str:
+        return self._xml_path
 
-  @property
-  def mj_model(self) -> mujoco.MjModel:
-    return self._mj_model
+    @property
+    def action_size(self) -> int:
+        return self._mjx_model.nu
 
-  @property
-  def mjx_model(self) -> mjx.Model:
-    return self._mjx_model
+    @property
+    def mj_model(self) -> mujoco.MjModel:
+        return self._mj_model
+
+    @property
+    def mjx_model(self) -> mjx.Model:
+        return self._mjx_model
