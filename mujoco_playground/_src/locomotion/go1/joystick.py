@@ -218,18 +218,18 @@ class Joystick(go1_base.Go1Env):
         reward, done = jp.zeros(2)
         return mjx_env.State(data, obs, reward, done, metrics, info)
 
-    # def _reset_if_outside_bounds(self, state: mjx_env.State) -> mjx_env.State:
-    #   qpos = state.data.qpos
-    #   new_x = jp.where(jp.abs(qpos[0]) > 9.5, 0.0, qpos[0])
-    #   new_y = jp.where(jp.abs(qpos[1]) > 9.5, 0.0, qpos[1])
-    #   qpos = qpos.at[0:2].set(jp.array([new_x, new_y]))
-    #   state = state.replace(data=state.data.replace(qpos=qpos))
-    #   return state
+    def _reset_if_outside_bounds(self, state: mjx_env.State) -> mjx_env.State:
+        qpos = state.data.qpos
+        new_x = jp.where(jp.abs(qpos[0]) > 9.5, 0.0, qpos[0])
+        new_y = jp.where(jp.abs(qpos[1]) > 9.5, 0.0, qpos[1])
+        qpos = qpos.at[0:2].set(jp.array([new_x, new_y]))
+        state = state.replace(data=state.data.replace(qpos=qpos))
+        return state
 
     def step(self, state: mjx_env.State, action: jax.Array) -> mjx_env.State:
         if self._config.pert_config.enable:
             state = self._maybe_apply_perturbation(state)
-        # state = self._reset_if_outside_bounds(state)
+        state = self._reset_if_outside_bounds(state)
 
         motor_targets = self._default_pose + action * self._config.action_scale
         data = mjx_env.step(self.mjx_model, state.data, motor_targets, self.n_substeps)

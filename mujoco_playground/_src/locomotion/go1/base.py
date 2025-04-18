@@ -65,9 +65,9 @@ class Go1Env(mjx_env.MjxEnv):
 
     def __init__(
         self,
-        task: str,
         xml_path: str,
         config: config_dict.ConfigDict,
+        task: str = None,
         config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
     ) -> None:
         super().__init__(config, config_overrides)
