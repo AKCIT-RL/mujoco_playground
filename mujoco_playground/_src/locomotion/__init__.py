@@ -61,6 +61,9 @@ _envs = {
     "G1JoystickFlatTerrain": functools.partial(
         g1_joystick.Joystick, task="flat_terrain"
     ),
+    "G1JoystickRoughTerrain": functools.partial(
+        g1_joystick.Joystick, task="rough_terrain"
+    ),
     "Go1JoystickRoughTerrain": functools.partial(
         go1_joystick.Joystick, task="rough_terrain"
     ),
