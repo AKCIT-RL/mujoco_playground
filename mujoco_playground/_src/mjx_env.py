@@ -108,6 +108,42 @@ def ensure_menagerie_exists() -> None:
       print(f"Error downloading mujoco_menagerie: {e}", file=sys.stderr)
       raise
 
+  # After ensuring the repo exists, try to fetch LFS assets if available.
+  # Many meshes in menagerie are stored via Git LFS; without it, files will be
+  # tiny pointer stubs that break mesh loading.
+  try:
+    subprocess.run(
+        ["git", "lfs", "install"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    subprocess.run(
+        ["git", "-C", str(MENAGERIE_PATH), "lfs", "pull"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+  except Exception:
+    # Non-fatal: we'll validate below and provide a clear error if needed.
+    pass
+
+  # Quick validation for a known mesh; detect LFS pointer files.
+  candidate = MENAGERIE_PATH / "unitree_go2" / "assets" / "base_0.obj"
+  if candidate.exists():
+    try:
+      head = candidate.read_bytes()[:80]
+      if b"git-lfs.github.com/spec/v1" in head:
+        msg = (
+            "Detected Git LFS pointer files in mujoco_menagerie. "
+            "Please install Git LFS (https://git-lfs.com), then run:\n"
+            f"  git -C {MENAGERIE_PATH} lfs pull\n"
+            "Alternatively, switch to the no-visuals XML to bypass meshes."
+        )
+        warnings.warn(msg)
+    except Exception:
+      pass
+
 
 Observation = Union[jax.Array, Mapping[str, jax.Array]]
 ObservationSize = Union[int, Mapping[str, Union[Tuple[int, ...], int]]]

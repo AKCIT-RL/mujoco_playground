@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Domain randomization for the Go1 environment."""
+"""Domain randomization for the Go2 environment."""
 
 import jax
 from mujoco import mjx

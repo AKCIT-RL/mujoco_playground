@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Defines Unitree Go1 quadruped constants."""
+"""Defines Unitree Go2 quadruped constants."""
 
 from etils import epath
 

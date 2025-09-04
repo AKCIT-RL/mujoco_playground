@@ -28,6 +28,9 @@ from mujoco_playground._src.locomotion.go2 import go2_constants as consts
 
 
 def get_assets() -> Dict[str, bytes]:
+  # Ensure menagerie exists before trying to load assets
+  mjx_env.ensure_menagerie_exists()
+  
   assets = {}
   mjx_env.update_assets(assets, consts.ROOT_PATH / "xmls", "*.xml")
   mjx_env.update_assets(assets, consts.ROOT_PATH / "xmls" / "assets")
@@ -48,6 +51,7 @@ class Go2Env(mjx_env.MjxEnv):
   ) -> None:
     super().__init__(config, config_overrides)
 
+    # Load assets only when needed, not at module import time
     self._model_assets = get_assets()
     self._mj_model = mujoco.MjModel.from_xml_string(
         epath.Path(xml_path).read_text(), assets=self._model_assets
@@ -67,11 +71,15 @@ class Go2Env(mjx_env.MjxEnv):
     self._xml_path = xml_path
     self._imu_site_id = self._mj_model.site("imu").id
 
-    # Contact sensor ids.
-    self._feet_floor_found_sensor = [
-        self._mj_model.sensor(f"{geom}_floor_found").id
-        for geom in consts.FEET_GEOMS
-    ]
+    # Contact sensor ids - handle missing sensors gracefully
+    try:
+        self._feet_floor_found_sensor = [
+            self._mj_model.sensor(f"{geom}_floor_found").id
+            for geom in consts.FEET_GEOMS
+        ]
+    except KeyError:
+        # If the sensors don't exist, set to empty list
+        self._feet_floor_found_sensor = []
 
   # Sensor readings.
 
