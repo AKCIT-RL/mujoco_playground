@@ -139,10 +139,13 @@ class Handstand(go2_base.Go2Env):
     )
 
     # Contact sensor ids.
-    self._fullcollision_floor_found_sensor = [
-        self._mj_model.sensor(f"{geom}_floor_found").id
-        for geom in geom_names
-    ]
+    try:
+      self._fullcollision_floor_found_sensor = [
+          self._mj_model.sensor(f"{geom}_floor_found").id
+          for geom in geom_names
+      ]
+    except KeyError:
+      self._fullcollision_floor_found_sensor = []
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
     rng, reset_rng = jax.random.split(rng)
@@ -195,6 +198,8 @@ class Handstand(go2_base.Go2Env):
         data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
         for sensorid in self._fullcollision_floor_found_sensor
     ])
+    if contact.size == 0:
+      contact = jp.zeros(len(self._unwanted_contact_geom_ids), dtype=bool)
     obs = self._get_obs(data, info, contact)
     reward, done = jp.zeros(2)
     return mjx_env.State(data, obs, reward, done, metrics, info)
@@ -209,6 +214,8 @@ class Handstand(go2_base.Go2Env):
         data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
         for sensorid in self._fullcollision_floor_found_sensor
     ])
+    if contact.size == 0:
+      contact = jp.zeros(len(self._unwanted_contact_geom_ids), dtype=bool)
     obs = self._get_obs(data, state.info, contact)
     done = self._get_termination(data, state.info, contact)
 

@@ -255,10 +255,14 @@ class Joystick(go2_base.Go2Env):
         self.mjx_model, state.data, motor_targets, self.n_substeps
     )
 
-    contact = jp.array([
-        data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
-        for sensorid in self._feet_floor_found_sensor
-    ])
+    # Robust contact detection: default to zeros if sensors are unavailable
+    if not self._feet_floor_found_sensor or len(self._feet_floor_found_sensor) != 4:
+      contact = jp.zeros(4, dtype=bool)
+    else:
+      contact = jp.array([
+          data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
+          for sensorid in self._feet_floor_found_sensor
+      ])
     contact_filt = contact | state.info["last_contact"]
     first_contact = (state.info["feet_air_time"] > 0.0) * contact_filt
     state.info["feet_air_time"] += self.dt
