@@ -148,6 +148,7 @@ class Joystick(go2_base.Go2Env):
     self._cmd_b = jp.array(self._config.command_config.b)
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
+    self.reset_field_pattern()
     qpos = self._init_q
     qvel = jp.zeros(self.mjx_model.nv)
 

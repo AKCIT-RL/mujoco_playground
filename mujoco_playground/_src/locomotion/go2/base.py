@@ -39,6 +39,29 @@ def get_assets() -> Dict[str, bytes]:
   mjx_env.update_assets(assets, path / "assets")
   return assets
 
+import numpy as np
+from PIL import Image
+import os
+
+
+def create_random_grayscale(mu=128, sigma=32, size=256, squares=8, xml_path=None):
+    # Create array for the pattern
+    pattern = np.zeros((size, size), dtype=np.uint8)
+    square_size = size // squares
+
+    # Generate random grayscale values for each square
+    for i in range(squares):
+        for j in range(squares):
+            # Random value between 0 (black) and 255 (white)
+            gray_value = int(np.clip(np.random.normal(mu, sigma), 0, 255))
+            pattern[
+                i * square_size : (i + 1) * square_size,
+                j * square_size : (j + 1) * square_size,
+            ] = gray_value
+
+    # Convert to image and save
+    img = Image.fromarray(pattern)
+    img.save(os.path.join(os.path.dirname(xml_path), "assets", "hfield.png"))
 
 class Go2Env(mjx_env.MjxEnv):
   """Base class for Go2 environments."""
@@ -50,6 +73,8 @@ class Go2Env(mjx_env.MjxEnv):
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ) -> None:
     super().__init__(config, config_overrides)
+
+    create_random_grayscale(126.6272, 73.6490, 256, 256, xml_path)
 
     # Load assets only when needed, not at module import time
     self._model_assets = get_assets()
@@ -81,6 +106,10 @@ class Go2Env(mjx_env.MjxEnv):
         # If the sensors don't exist, set to empty list
         self._feet_floor_found_sensor = []
 
+
+  def reset_field_pattern(self):
+    create_random_grayscale(126.6272, 73.6490, 256, 256, self._xml_path)
+    
   # Sensor readings.
 
   def get_upvector(self, data: mjx.Data) -> jax.Array:
