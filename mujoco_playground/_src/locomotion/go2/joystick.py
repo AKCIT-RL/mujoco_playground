@@ -90,8 +90,9 @@ def default_config() -> config_dict.ConfigDict:
           b=[0.9, 0.25, 0.5],
       ),
       impl="warp",
-      # go2 adds full-collision contact sensors (extra front-leg geoms), which
-      # raise the broadphase candidate-pair count well above the go1 value.
+      # naconmax is the global broadphase candidate-pair buffer (summed over all
+      # envs). With 4 collidable feet, the worst case is ~4 pairs * num_envs; the
+      # go1-inherited 4*8192 was below 4*16384=65536 and overflowed at 16384 envs.
       naconmax=10 * 8192,
       njmax=40,
   )
