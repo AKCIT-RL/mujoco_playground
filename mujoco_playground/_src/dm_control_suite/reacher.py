@@ -39,8 +39,8 @@ def default_config() -> config_dict.ConfigDict:
       episode_length=1000,
       action_repeat=1,
       vision=False,
-      impl="jax",
-      nconmax=0,
+      impl="warp",
+      naconmax=0,
       njmax=0,
   )
 
@@ -49,7 +49,7 @@ def _make_model(
     xml_path: epath.Path, target_size: float, assets: Dict[str, Any]
 ) -> mujoco.MjModel:
   spec = mujoco.MjSpec.from_string(xml_path.read_text(), assets)
-  if mujoco.__version__ >= "3.3.0":
+  if mujoco.mj_version() >= 330:
     target_body = spec.body("target")
   else:
     target_body = spec.find_body("target")
@@ -113,7 +113,7 @@ class Reacher(mjx_env.MjxEnv):
         self.mj_model,
         qpos=qpos,
         impl=self.mjx_model.impl.value,
-        nconmax=self._config.nconmax,
+        naconmax=self._config.naconmax,
         njmax=self._config.njmax,
     )
     data = mjx.forward(self.mjx_model, data)
