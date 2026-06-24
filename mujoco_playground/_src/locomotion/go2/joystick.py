@@ -89,8 +89,8 @@ def default_config() -> config_dict.ConfigDict:
           # Probability of not zeroing out new command.
           b=[0.9, 0.25, 0.5],
       ),
-      impl="jax",
-      nconmax=4 * 8192,
+      impl="warp",
+      naconmax=4 * 8192,
       njmax=40,
   )
 
@@ -105,8 +105,8 @@ class Joystick(go2_base.Go2Env):
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ):
     if task.startswith("rough"):
-      config.nconmax = 100 * 8192
-      config.njmax = 12 + 100 * 4
+      config.naconmax = 8 * 8192
+      config.njmax = 12 + 48
     super().__init__(
         xml_path=consts.task_to_xml(task).as_posix(),
         config=config,
@@ -148,7 +148,6 @@ class Joystick(go2_base.Go2Env):
     self._cmd_b = jp.array(self._config.command_config.b)
 
   def reset(self, rng: jax.Array) -> mjx_env.State:
-    self.reset_field_pattern()
     qpos = self._init_q
     qvel = jp.zeros(self.mjx_model.nv)
 
@@ -174,7 +173,7 @@ class Joystick(go2_base.Go2Env):
         qvel=qvel,
         ctrl=qpos[7:],
         impl=self.mjx_model.impl.value,
-        nconmax=self._config.nconmax,
+        naconmax=self._config.naconmax,
         njmax=self._config.njmax,
     )
     data = mjx.forward(self.mjx_model, data)
@@ -256,14 +255,10 @@ class Joystick(go2_base.Go2Env):
         self.mjx_model, state.data, motor_targets, self.n_substeps
     )
 
-    # Robust contact detection: default to zeros if sensors are unavailable
-    if not self._feet_floor_found_sensor or len(self._feet_floor_found_sensor) != 4:
-      contact = jp.zeros(4, dtype=bool)
-    else:
-      contact = jp.array([
-          data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
-          for sensorid in self._feet_floor_found_sensor
-      ])
+    contact = jp.array([
+        data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
+        for sensorid in self._feet_floor_found_sensor
+    ])
     contact_filt = contact | state.info["last_contact"]
     first_contact = (state.info["feet_air_time"] > 0.0) * contact_filt
     state.info["feet_air_time"] += self.dt
