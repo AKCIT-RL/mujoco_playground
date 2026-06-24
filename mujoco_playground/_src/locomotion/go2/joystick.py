@@ -90,7 +90,9 @@ def default_config() -> config_dict.ConfigDict:
           b=[0.9, 0.25, 0.5],
       ),
       impl="warp",
-      naconmax=4 * 8192,
+      # go2 adds full-collision contact sensors (extra front-leg geoms), which
+      # raise the broadphase candidate-pair count well above the go1 value.
+      naconmax=10 * 8192,
       njmax=40,
   )
 
@@ -105,7 +107,7 @@ class Joystick(go2_base.Go2Env):
       config_overrides: Optional[Dict[str, Union[str, int, list[Any]]]] = None,
   ):
     if task.startswith("rough"):
-      config.naconmax = 8 * 8192
+      config.naconmax = 12 * 8192
       config.njmax = 12 + 48
     super().__init__(
         xml_path=consts.task_to_xml(task).as_posix(),
