@@ -141,6 +141,13 @@ class Handstand(go2_base.Go2Env):
         for geom in geom_names
     ]
 
+    # In a handstand the front feet are the support, so the contact cost must
+    # only penalize the non-support (rear) feet. Penalizing the support feet
+    # rewards being airborne, which collapses into hopping on a single paw.
+    self._nonsupport_feet_floor_found_sensor = [
+        self._mj_model.sensor(f"{geom}_floor_found").id for geom in ("RR", "RL")
+    ]
+
   def reset(self, rng: jax.Array) -> mjx_env.State:
     rng, reset_rng = jax.random.split(rng)
 
@@ -357,11 +364,11 @@ class Handstand(go2_base.Go2Env):
     return jp.exp(-error / 1.0)
 
   def _cost_contact(self, data: mjx.Data) -> jax.Array:
-    feet_contact = jp.array([
+    nonsupport_feet_contact = jp.array([
         data.sensordata[self._mj_model.sensor_adr[sensorid]] > 0
-        for sensorid in self._feet_floor_found_sensor
+        for sensorid in self._nonsupport_feet_floor_found_sensor
     ])
-    return jp.any(feet_contact)
+    return jp.any(nonsupport_feet_contact)
 
   def _cost_pose(self, qpos: jax.Array) -> jax.Array:
     return jp.sum(jp.square(qpos[self._joint_ids] - self._joint_pose))
@@ -417,7 +424,21 @@ class Footstand(Handstand):
         [self._mj_model.geom(name).id for name in geom_names]
     )
 
+    # Rebuild the collision-termination sensors for the rear legs. The parent
+    # Handstand._post_init wired these to the front-leg geoms, which never
+    # touch the floor during a footstand, so a robot resting on its rear
+    # calf/knee would otherwise never terminate the episode.
+    self._fullcollision_floor_found_sensor = [
+        self._mj_model.sensor(f"{geom}_floor_found").id for geom in geom_names
+    ]
+
     feet_geom_names = ["FR", "FL"]
     self._feet_geom_ids = np.array(
         [self._mj_model.geom(name).id for name in feet_geom_names]
     )
+
+    # In a footstand the rear feet are the support, so the contact cost should
+    # only penalize the non-support (front) feet.
+    self._nonsupport_feet_floor_found_sensor = [
+        self._mj_model.sensor(f"{geom}_floor_found").id for geom in ("FR", "FL")
+    ]
