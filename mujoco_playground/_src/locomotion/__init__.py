@@ -33,9 +33,13 @@ from mujoco_playground._src.locomotion.go1 import handstand as go1_handstand
 from mujoco_playground._src.locomotion.go1 import joystick as go1_joystick
 from mujoco_playground._src.locomotion.go1 import randomize as go1_randomize
 from mujoco_playground._src.locomotion.go2 import getup as go2_getup
+from mujoco_playground._src.locomotion.go2 import getup_walk as go2_getup_walk
 from mujoco_playground._src.locomotion.go2 import handstand as go2_handstand
 from mujoco_playground._src.locomotion.go2 import joystick as go2_joystick
+from mujoco_playground._src.locomotion.go2 import push_recovery as go2_push_recovery
 from mujoco_playground._src.locomotion.go2 import randomize as go2_randomize
+from mujoco_playground._src.locomotion.go2 import rough_curriculum as go2_rough_curriculum
+from mujoco_playground._src.locomotion.h1 import getup as h1_getup
 from mujoco_playground._src.locomotion.h1 import inplace_gait_tracking as h1_inplace_gait_tracking
 from mujoco_playground._src.locomotion.h1 import joystick_gait_tracking as h1_joystick_gait_tracking
 from mujoco_playground._src.locomotion.op3 import joystick as op3_joystick
@@ -79,8 +83,14 @@ _envs = {
         go2_joystick.Joystick, task="rough_terrain"
     ),
     "Go2Getup": go2_getup.Getup,
+    "Go2GetupWalk": go2_getup_walk.GetupWalk,
+    "Go2PushRecovery": functools.partial(
+        go2_push_recovery.PushRecovery, task="flat_terrain"
+    ),
+    "Go2RoughCurriculum": go2_rough_curriculum.RoughCurriculum,
     "Go2Handstand": go2_handstand.Handstand,
     "Go2Footstand": go2_handstand.Footstand,
+    "H1Getup": h1_getup.Getup,
     "H1InplaceGaitTracking": h1_inplace_gait_tracking.InplaceGaitTracking,
     "H1JoystickGaitTracking": h1_joystick_gait_tracking.JoystickGaitTracking,
     "Op3Joystick": op3_joystick.Joystick,
@@ -118,8 +128,12 @@ _cfgs = {
     "Go2JoystickFlatTerrain": go2_joystick.default_config,
     "Go2JoystickRoughTerrain": go2_joystick.default_config,
     "Go2Getup": go2_getup.default_config,
+    "Go2GetupWalk": go2_getup_walk.default_config,
+    "Go2PushRecovery": go2_push_recovery.default_config,
+    "Go2RoughCurriculum": go2_rough_curriculum.default_config,
     "Go2Handstand": go2_handstand.default_config,
     "Go2Footstand": go2_handstand.default_config,
+    "H1Getup": h1_getup.default_config,
     "H1InplaceGaitTracking": h1_inplace_gait_tracking.default_config,
     "H1JoystickGaitTracking": h1_joystick_gait_tracking.default_config,
     "Op3Joystick": op3_joystick.default_config,
@@ -147,6 +161,8 @@ _randomizer = {
     "Go2JoystickFlatTerrain": go2_randomize.domain_randomize,
     "Go2JoystickRoughTerrain": go2_randomize.domain_randomize,
     "Go2Getup": go2_randomize.domain_randomize,
+    "Go2GetupWalk": go2_randomize.domain_randomize,
+    "Go2PushRecovery": go2_randomize.domain_randomize,
     "Go2Handstand": go2_randomize.domain_randomize,
     "Go2Footstand": go2_randomize.domain_randomize,
     "T1JoystickFlatTerrain": t1_randomize.domain_randomize,
