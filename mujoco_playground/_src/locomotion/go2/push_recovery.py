@@ -42,13 +42,14 @@ def default_config() -> config_dict.ConfigDict:
   """Joystick config with perturbations enabled for push recovery."""
   config = go2_joystick.default_config()
   config.pert_config.enable = True
-  # Strong kicks meant to *almost knock the robot over* so it has to actively
-  # recover and resume walking. Note: the force follows a half-sine profile, so
-  # the real velocity change is ~pert_mag/pi (about a third of the nominal
-  # value); hence the large nominal range here. Durations are a touch longer to
-  # deliver more impulse per kick.
-  config.pert_config.velocity_kick = [3.0, 9.0]
-  config.pert_config.kick_durations = [0.1, 0.3]
+  # Strong, sharp kicks meant to *almost knock the robot over* so it has to
+  # actively recover and resume walking. The force follows a half-sine profile,
+  # so the real velocity change is ~pert_mag/pi (about a third of the nominal
+  # value) and is independent of duration; shorter durations therefore give a
+  # higher *peak* force (a sharp kick rather than a slow shove). We use a large
+  # nominal magnitude and short durations to simulate a hard kick.
+  config.pert_config.velocity_kick = [8.0, 16.0]
+  config.pert_config.kick_durations = [0.05, 0.15]
   config.pert_config.kick_wait_times = [1.0, 3.0]
   return config
 
