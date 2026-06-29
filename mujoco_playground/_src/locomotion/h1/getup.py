@@ -64,7 +64,7 @@ def default_config() -> config_dict.ConfigDict:
           scales=config_dict.create(
               orientation=1.0,
               torso_height=1.0,
-              posture=1.0,
+              posture=2.0,
               standing=1.0,
               stand_still=1.0,
               action_rate=-0.001,
@@ -305,12 +305,20 @@ class Getup(h1_base.H1Env):
     gravity = self.get_gravity(data)
     is_upright = self._is_upright(gravity)
     is_at_desired_height = self._is_at_desired_height(torso_height)
-    gate = is_upright * is_at_desired_height
+    # The legs must actually be in the standing configuration (not lying flat /
+    # "sitting") before the standing bonus is granted. Without this the robot
+    # can game the height/orientation rewards by jackknifing at the hips while
+    # the legs stay on the ground.
+    is_good_posture = self._is_good_posture(joint_angles)
+    gate = is_upright * is_at_desired_height * is_good_posture
 
     return {
         "orientation": self._reward_orientation(gravity),
         "torso_height": self._reward_height(torso_height),
-        "posture": self._reward_posture(joint_angles, is_upright),
+        # Posture is rewarded continuously (not gated) so that extending the
+        # legs toward the standing pose is encouraged throughout the recovery,
+        # not only once already upright.
+        "posture": self._reward_posture(joint_angles),
         "standing": gate.astype(jp.float32),
         "stand_still": self._reward_stand_still(action, gate),
         "action_rate": self._cost_action_rate(action, info),
@@ -331,6 +339,13 @@ class Getup(h1_base.H1Env):
     height_error = self._z_des - height
     return height_error < pos_tol
 
+  def _is_good_posture(
+      self, joint_angles: jax.Array, posture_tol: float = 1.0
+  ) -> jax.Array:
+    # Legs are the first 10 joints (5 per leg) in the H1 actuator ordering.
+    leg_error = jp.sum(jp.square(joint_angles[:10] - self._default_pose[:10]))
+    return leg_error < posture_tol
+
   def _reward_orientation(self, up_vec: jax.Array) -> jax.Array:
     error = jp.sum(jp.square(self._up_vec - up_vec))
     return jp.exp(-2.0 * error)
@@ -339,12 +354,9 @@ class Getup(h1_base.H1Env):
     height = jp.min(jp.array([torso_height, self._z_des]))
     return jp.exp(height) - 1.0
 
-  def _reward_posture(
-      self, joint_angles: jax.Array, gate: jax.Array
-  ) -> jax.Array:
+  def _reward_posture(self, joint_angles: jax.Array) -> jax.Array:
     cost = jp.sum(jp.square(joint_angles - self._default_pose))
-    rew = jp.exp(-0.5 * cost)
-    return gate * rew
+    return jp.exp(-0.5 * cost)
 
   def _reward_stand_still(self, act: jax.Array, gate: jax.Array) -> jax.Array:
     cost = jp.sum(jp.square(act))
