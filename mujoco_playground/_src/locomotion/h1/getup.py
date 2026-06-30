@@ -315,10 +315,11 @@ class Getup(h1_base.H1Env):
     return {
         "orientation": self._reward_orientation(gravity),
         "torso_height": self._reward_height(torso_height),
-        # Posture is rewarded continuously (not gated) so that extending the
-        # legs toward the standing pose is encouraged throughout the recovery,
-        # not only once already upright.
-        "posture": self._reward_posture(joint_angles),
+        # Posture is rewarded continuously (not hard-gated) but scaled by how
+        # upright the robot is, so matching the default pose only pays off while
+        # standing up. This removes both the "sit" exploit (legs flat while the
+        # torso jackknifes up) and the "lie flat in the default pose" exploit.
+        "posture": self._reward_posture(joint_angles, gravity),
         "standing": gate.astype(jp.float32),
         "stand_still": self._reward_stand_still(action, gate),
         "action_rate": self._cost_action_rate(action, info),
@@ -354,9 +355,14 @@ class Getup(h1_base.H1Env):
     height = jp.min(jp.array([torso_height, self._z_des]))
     return jp.exp(height) - 1.0
 
-  def _reward_posture(self, joint_angles: jax.Array) -> jax.Array:
+  def _reward_posture(
+      self, joint_angles: jax.Array, gravity: jax.Array
+  ) -> jax.Array:
     cost = jp.sum(jp.square(joint_angles - self._default_pose))
-    return jp.exp(-0.5 * cost)
+    # ``gravity`` (upvector sensor) z-component is ~1 when upright and ~0 when
+    # lying flat, so this factor zeroes out the posture reward on the ground.
+    upright = jp.clip(gravity[2], 0.0, 1.0)
+    return upright * jp.exp(-0.5 * cost)
 
   def _reward_stand_still(self, act: jax.Array, gate: jax.Array) -> jax.Array:
     cost = jp.sum(jp.square(act))
