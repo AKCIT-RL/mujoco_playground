@@ -91,6 +91,8 @@ def default_config() -> config_dict.ConfigDict:
               standup=10.0,
               # Locomotion (phase 2).
               tracking_lin_vel=2.0,
+              heading=2.0,
+              walking_pose=0.5,
               progress=1.0,
               arrival=50.0,
               # Regularization (both phases).
@@ -371,6 +373,11 @@ class GetupWalk(go2_base.Go2Env):
     active = stood * (1.0 - info["arrived"])
     desired_vel = self._config.forward_speed * goal_dir
     local_vel = self.get_local_linvel(data)
+    # Heading error: angle between the robot's forward (+x) axis and the goal
+    # direction. Zero when facing the goal, +/-pi when facing away. Without this
+    # term the velocity/progress rewards are orientation-agnostic, so the robot
+    # can walk backwards toward the goal for the same reward.
+    heading_error = jp.arctan2(local_goal[1], local_goal[0])
 
     return {
         "orientation": self._reward_orientation(gravity),
@@ -381,6 +388,8 @@ class GetupWalk(go2_base.Go2Env):
             desired_vel, local_vel[:2]
         )
         * active,
+        "heading": self._reward_heading(heading_error) * active,
+        "walking_pose": self._reward_walking_pose(joint_angles) * active,
         "progress": jp.clip(jp.dot(local_vel[:2], goal_dir), 0.0, None) * active,
         "arrival": newly_arrived.astype(jp.float32),
         "action_rate": self._cost_action_rate(action, info),
@@ -428,6 +437,18 @@ class GetupWalk(go2_base.Go2Env):
   ) -> jax.Array:
     lin_vel_error = jp.sum(jp.square(desired_vel - local_vel))
     return jp.exp(-lin_vel_error / self._config.reward_config.tracking_sigma)
+
+  def _reward_heading(self, heading_error: jax.Array) -> jax.Array:
+    # 1 when facing the goal, 0 when facing directly away. Smooth across the
+    # whole range so there is always a gradient to turn toward the goal.
+    return 0.5 * (1.0 + jp.cos(heading_error))
+
+  def _reward_walking_pose(self, qpos: jax.Array) -> jax.Array:
+    # Stay close to the default pose while walking (same scheme as the joystick
+    # task): hip/thigh joints are weighted 1.0 to keep a clean upright posture,
+    # but the knee weight is 0.1 so the legs can still flex freely for the gait.
+    weight = jp.array([1.0, 1.0, 0.1] * 4)
+    return jp.exp(-jp.sum(jp.square(qpos - self._default_pose) * weight))
 
   def _cost_torques(self, torques: jax.Array) -> jax.Array:
     return jp.sqrt(jp.sum(jp.square(torques))) + jp.sum(jp.abs(torques))
