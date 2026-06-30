@@ -47,36 +47,79 @@ def _difficulty_for_row(
   return d0 + (d1 - d0) * frac
 
 
+# Fraction of the tile (half-extent) kept as a flat central spawn plateau.
+_PLATEAU_FRAC = 0.35
+# Fraction of the tile (half-extent) kept flat at height 0 along every border so
+# that neighbouring tiles connect seamlessly (no vertical cliffs at the seams).
+_BORDER_FRAC = 0.1
+# Hard cap on tile elevation (meters). Keeps the heightfield gentle enough for
+# the feet-only Go2 collision model (steep multi-meter features make the small
+# foot geoms tunnel through the hfield prisms).
+_MAX_TILE_HEIGHT = 0.30
+
+
+def _edge_ramp(tile_px: int, res: float) -> np.ndarray:
+  """Returns, per pixel, the normalized ramp weight in ``[0, 1]``.
+
+  The weight is 1 over the central plateau, ramps linearly down to 0 across the
+  active ring, and is 0 on the outer border. It depends only on the Chebyshev
+  distance to the tile centre, so every tile edge is flat at height 0 and tiles
+  tile seamlessly regardless of type/difficulty.
+  """
+  half = 0.5 * tile_px * res
+  plateau = _PLATEAU_FRAC * half
+  border = _BORDER_FRAC * half
+  coords = (np.arange(tile_px, dtype=np.float32) + 0.5) * res - half
+  dx = np.abs(coords)[None, :]
+  dy = np.abs(coords)[:, None]
+  d = np.maximum(dx, dy)  # Chebyshev distance to centre, in meters.
+  span = (half - border) - plateau
+  w = (half - border - d) / max(span, 1e-6)
+  return np.clip(w, 0.0, 1.0).astype(np.float32)
+
+
 def _tile_rough(
     tile_px: int, res: float, difficulty: float, rng: np.random.Generator
 ) -> np.ndarray:
-  """Random bumps. Amplitude grows ~1cm -> ~12cm with difficulty."""
-  amp = 0.01 + (0.12 - 0.01) * difficulty
-  return rng.uniform(0.0, amp, size=(tile_px, tile_px)).astype(np.float32)
+  """Random bumps. Amplitude grows ~2cm -> ~10cm with difficulty.
+
+  Edges fade to 0 so the rough patch tiles seamlessly with its neighbours.
+  """
+  amp = 0.02 + (0.10 - 0.02) * difficulty
+  amp = min(amp, _MAX_TILE_HEIGHT)
+  noise = rng.uniform(0.0, amp, size=(tile_px, tile_px)).astype(np.float32)
+  return noise * _edge_ramp(tile_px, res)
 
 
 def _tile_slope(
     tile_px: int, res: float, difficulty: float, rng: np.random.Generator
 ) -> np.ndarray:
-  """Linear ramp along +x. Angle grows ~5deg -> ~25deg with difficulty."""
+  """Raised flat-topped mesa with linear slopes down to every edge.
+
+  The robot spawns on the central plateau and walks down a slope (~5deg ->
+  ~20deg) to the seam, where the height returns to 0 so tiles connect.
+  """
   del rng
-  angle_deg = 5.0 + (25.0 - 5.0) * difficulty
-  slope = np.tan(np.deg2rad(angle_deg))
-  x_local = (np.arange(tile_px, dtype=np.float32) + 0.5) * res  # [0, tile_size]
-  row = slope * x_local  # height per column.
-  return np.tile(row[None, :], (tile_px, 1)).astype(np.float32)
+  peak = 0.05 + (_MAX_TILE_HEIGHT - 0.05) * difficulty
+  return peak * _edge_ramp(tile_px, res)
 
 
 def _tile_stairs(
     tile_px: int, res: float, difficulty: float, rng: np.random.Generator
 ) -> np.ndarray:
-  """Ascending stairs along +x. Step height grows ~3cm -> ~15cm."""
+  """Stepped pyramid: stairs ascend from every edge up to a central plateau.
+
+  Step height grows ~3cm -> ~10cm with difficulty; the outermost ring stays at
+  height 0 so neighbouring tiles connect without a cliff.
+  """
   del rng
-  step_h = 0.03 + (0.15 - 0.03) * difficulty
-  step_w = 0.3  # meters per tread.
-  x_local = (np.arange(tile_px, dtype=np.float32) + 0.5) * res
-  row = step_h * np.floor(x_local / step_w)
-  return np.tile(row[None, :], (tile_px, 1)).astype(np.float32)
+  step_h = 0.03 + (0.10 - 0.03) * difficulty
+  ramp = _edge_ramp(tile_px, res)
+  peak = min(_MAX_TILE_HEIGHT, step_h * 6.0)
+  # Quantize the smooth ramp into discrete steps of height ``step_h``.
+  levels = np.maximum(np.round(peak / step_h), 1.0)
+  stepped = np.round(ramp * levels) * step_h
+  return np.minimum(stepped, peak).astype(np.float32)
 
 
 _TILE_FNS = {
