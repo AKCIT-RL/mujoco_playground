@@ -63,7 +63,7 @@ def default_config() -> config_dict.ConfigDict:
       reward_config=config_dict.create(
           scales=config_dict.create(
               orientation=1.0,
-              torso_height=1.0,
+              torso_height=2.0,
               posture=2.0,
               standing=1.0,
               stand_still=1.0,
@@ -312,8 +312,17 @@ class Getup(h1_base.H1Env):
     is_good_posture = self._is_good_posture(joint_angles)
     gate = is_upright * is_at_desired_height * is_good_posture
 
+    # Fraction of the standing height (0 on the ground, 1 when fully stood up).
+    # It gates the orientation reward so that keeping the torso vertical only
+    # pays off while the robot is actually tall. Otherwise the agent settles
+    # into a stable "sit": a vertical torso close to the floor collects the
+    # full orientation reward for free, which is a strong local optimum for a
+    # biped. Coupling the two removes that free lunch while preserving a
+    # monotonic sit -> stand gradient (both factors grow as the robot rises).
+    height_frac = jp.clip(torso_height / self._z_des, 0.0, 1.0)
+
     return {
-        "orientation": self._reward_orientation(gravity),
+        "orientation": height_frac * self._reward_orientation(gravity),
         "torso_height": self._reward_height(torso_height),
         # Posture is rewarded continuously (not hard-gated) but scaled by how
         # upright the robot is, so matching the default pose only pays off while
@@ -334,7 +343,7 @@ class Getup(h1_base.H1Env):
     return ori_error < ori_tol
 
   def _is_at_desired_height(
-      self, torso_height: jax.Array, pos_tol: float = 0.05
+      self, torso_height: jax.Array, pos_tol: float = 0.1
   ) -> jax.Array:
     height = jp.min(jp.array([torso_height, self._z_des]))
     height_error = self._z_des - height
@@ -352,8 +361,14 @@ class Getup(h1_base.H1Env):
     return jp.exp(-2.0 * error)
 
   def _reward_height(self, torso_height: jax.Array) -> jax.Array:
+    # Squared height fraction in [0, 1]. Being convex in the height, it pays
+    # partial ("sitting") heights quadratically less than the flat
+    # ``exp(height) - 1`` did (which saturated and handed out ~half of the
+    # maximum just for sitting), so standing up all the way is clearly the best
+    # option while a smooth climbing gradient is kept from the fallen pose.
     height = jp.min(jp.array([torso_height, self._z_des]))
-    return jp.exp(height) - 1.0
+    height_frac = height / self._z_des
+    return jp.square(height_frac)
 
   def _reward_posture(
       self, joint_angles: jax.Array, gravity: jax.Array
