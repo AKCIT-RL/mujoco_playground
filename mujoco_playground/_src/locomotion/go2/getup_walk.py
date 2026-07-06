@@ -83,6 +83,7 @@ def default_config() -> config_dict.ConfigDict:
       ),
       reward_config=config_dict.create(
           tracking_sigma=0.25,
+          max_foot_height=0.1,
           scales=config_dict.create(
               # Recovery (phase 1).
               orientation=1.0,
@@ -95,6 +96,12 @@ def default_config() -> config_dict.ConfigDict:
               walking_pose=0.5,
               progress=1.0,
               arrival=50.0,
+              # Settle: hold position once inside the goal acceptance radius.
+              settle=3.0,
+              # Gait quality (phase 2).
+              feet_air_time=0.1,
+              feet_slip=-0.1,
+              feet_clearance=-2.0,
               # Regularization (both phases).
               action_rate=-0.001,
               dof_pos_limits=-0.1,
@@ -138,6 +145,25 @@ class GetupWalk(go2_base.Go2Env):
     self._z_des = 0.275
     self._up_vec = jp.array([0.0, 0.0, -1.0])
     self._imu_site_id = self._mj_model.site("imu").id
+
+    # Feet sensors for the gait rewards (feet_air_time / feet_slip /
+    # feet_clearance), same scheme as the joystick task.
+    self._feet_site_id = np.array(
+        [self._mj_model.site(name).id for name in consts.FEET_SITES]
+    )
+    self._feet_floor_found_sensor = [
+        self._mj_model.sensor(f"{geom}_floor_found").id
+        for geom in consts.FEET_GEOMS
+    ]
+    foot_linvel_sensor_adr = []
+    for site in consts.FEET_SITES:
+      sensor_id = self._mj_model.sensor(f"{site}_global_linvel").id
+      sensor_adr = self._mj_model.sensor_adr[sensor_id]
+      sensor_dim = self._mj_model.sensor_dim[sensor_id]
+      foot_linvel_sensor_adr.append(
+          list(range(sensor_adr, sensor_adr + sensor_dim))
+      )
+    self._foot_linvel_sensor_adr = jp.array(foot_linvel_sensor_adr)
 
   def _get_random_qpos(self, rng: jax.Array) -> jax.Array:
     """Initial fallen configuration: 0.5m drop, random orientation/joints."""
@@ -200,6 +226,8 @@ class GetupWalk(go2_base.Go2Env):
         "stood": jp.zeros(()),
         "arrived": jp.zeros(()),
         "goal": goal,
+        "feet_air_time": jp.zeros(4),
+        "last_contact": jp.zeros(4, dtype=bool),
     }
 
     metrics = {
@@ -220,6 +248,15 @@ class GetupWalk(go2_base.Go2Env):
         self.mjx_model, state.data, motor_targets, self.n_substeps
     )
 
+    # Feet contact bookkeeping (drives the gait rewards).
+    contact = jp.array([
+        data.sensordata[self._mj_model.sensor_adr[sensor_id]] > 0
+        for sensor_id in self._feet_floor_found_sensor
+    ])
+    contact_filt = contact | state.info["last_contact"]
+    first_contact = (state.info["feet_air_time"] > 0.0) * contact_filt
+    state.info["feet_air_time"] += self.dt
+
     obs = self._get_obs(data, state.info)
     done = self._get_termination(data)
 
@@ -233,15 +270,23 @@ class GetupWalk(go2_base.Go2Env):
     stood = jp.maximum(state.info["stood"], stood_now.astype(jp.float32))
 
     distance = jp.linalg.norm(state.info["goal"] - data.qpos[0:2])
+    # Acceptance radius around the goal: once the (standing) robot is inside it
+    # the goal counts as reached and the robot switches to "settle" mode. The
+    # episode is NOT terminated on arrival so the robot can hold its position
+    # instead of the run ending the instant it touches the target.
     reached = (distance < self._config.goal_tolerance) & (stood > 0.5)
     newly_arrived = reached & (state.info["arrived"] < 0.5)
     arrived = jp.maximum(state.info["arrived"], reached.astype(jp.float32))
 
-    # Terminate on success (or on timeout, handled by episode_length).
-    done = jp.logical_or(done, reached)
-
     rewards = self._get_reward(
-        data, action, state.info, stood, newly_stood, newly_arrived
+        data,
+        action,
+        state.info,
+        stood,
+        newly_stood,
+        newly_arrived,
+        first_contact,
+        contact,
     )
     rewards = {
         k: v * self._config.reward_config.scales[k] for k, v in rewards.items()
@@ -252,6 +297,8 @@ class GetupWalk(go2_base.Go2Env):
     state.info["last_act"] = action
     state.info["stood"] = stood
     state.info["arrived"] = arrived
+    state.info["feet_air_time"] *= ~contact
+    state.info["last_contact"] = contact
     for k, v in rewards.items():
       state.metrics[f"reward/{k}"] = v
     state.metrics["stood"] = stood
@@ -356,6 +403,8 @@ class GetupWalk(go2_base.Go2Env):
       stood: jax.Array,
       newly_stood: jax.Array,
       newly_arrived: jax.Array,
+      first_contact: jax.Array,
+      contact: jax.Array,
   ) -> dict[str, jax.Array]:
     torso_height = data.site_xpos[self._imu_site_id][2]
     joint_angles = data.qpos[7:]
@@ -365,12 +414,10 @@ class GetupWalk(go2_base.Go2Env):
     is_upright = self._is_upright(gravity)
 
     # Desired local velocity points toward the goal at the configured speed.
-    # The locomotion command is only active once the robot is standing and has
-    # not yet arrived.
+    # The magnitude is constant (deliberately not scaled by distance).
     local_goal = self._goal_local(data, info["goal"])
     distance = jp.linalg.norm(info["goal"] - data.qpos[0:2])
     goal_dir = local_goal / (distance + 1e-6)
-    active = stood * (1.0 - info["arrived"])
     desired_vel = self._config.forward_speed * goal_dir
     local_vel = self.get_local_linvel(data)
     # Heading error: angle between the robot's forward (+x) axis and the goal
@@ -378,6 +425,13 @@ class GetupWalk(go2_base.Go2Env):
     # term the velocity/progress rewards are orientation-agnostic, so the robot
     # can walk backwards toward the goal for the same reward.
     heading_error = jp.arctan2(local_goal[1], local_goal[0])
+
+    # Acceptance radius: inside it the robot stops chasing the goal and settles;
+    # outside it (while standing) it walks toward the goal. This is what stops
+    # the robot from overshooting and "dancing" back and forth on the target.
+    in_goal = (distance < self._config.goal_tolerance).astype(jp.float32)
+    move_active = stood * (1.0 - in_goal)
+    settle_active = stood * in_goal
 
     return {
         "orientation": self._reward_orientation(gravity),
@@ -387,11 +441,19 @@ class GetupWalk(go2_base.Go2Env):
         "tracking_lin_vel": self._reward_tracking_lin_vel(
             desired_vel, local_vel[:2]
         )
-        * active,
-        "heading": self._reward_heading(heading_error) * active,
-        "walking_pose": self._reward_walking_pose(joint_angles) * active,
-        "progress": jp.clip(jp.dot(local_vel[:2], goal_dir), 0.0, None) * active,
+        * move_active,
+        "heading": self._reward_heading(heading_error) * move_active,
+        "walking_pose": self._reward_walking_pose(joint_angles) * stood,
+        "progress": jp.clip(jp.dot(local_vel[:2], goal_dir), 0.0, None)
+        * move_active,
         "arrival": newly_arrived.astype(jp.float32),
+        "settle": self._reward_settle(local_vel) * settle_active,
+        "feet_air_time": self._reward_feet_air_time(
+            info["feet_air_time"], first_contact
+        )
+        * move_active,
+        "feet_slip": self._cost_feet_slip(data, contact) * move_active,
+        "feet_clearance": self._cost_feet_clearance(data),
         "action_rate": self._cost_action_rate(action, info),
         "dof_pos_limits": self._cost_joint_pos_limits(data.qpos[7:]),
         "torques": self._cost_torques(joint_torques),
@@ -449,6 +511,40 @@ class GetupWalk(go2_base.Go2Env):
     # but the knee weight is 0.1 so the legs can still flex freely for the gait.
     weight = jp.array([1.0, 1.0, 0.1] * 4)
     return jp.exp(-jp.sum(jp.square(qpos - self._default_pose) * weight))
+
+  def _reward_settle(self, local_vel: jax.Array) -> jax.Array:
+    # Reward near-zero horizontal velocity so that, once inside the goal
+    # acceptance radius, the robot holds its position instead of oscillating
+    # ("dancing") back and forth around the target.
+    return jp.exp(
+        -jp.sum(jp.square(local_vel[:2]))
+        / self._config.reward_config.tracking_sigma
+    )
+
+  def _reward_feet_air_time(
+      self, air_time: jax.Array, first_contact: jax.Array
+  ) -> jax.Array:
+    # Reward each foot for spending ~0.1s in the air before touching down,
+    # which promotes clean stepping instead of shuffling.
+    return jp.sum((air_time - 0.1) * first_contact)
+
+  def _cost_feet_slip(self, data: mjx.Data, contact: jax.Array) -> jax.Array:
+    # Penalize horizontal foot velocity while in contact with the ground.
+    feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
+    vel_xy = feet_vel[..., :2]
+    vel_xy_norm_sq = jp.sum(jp.square(vel_xy), axis=-1)
+    return jp.sum(vel_xy_norm_sq * contact)
+
+  def _cost_feet_clearance(self, data: mjx.Data) -> jax.Array:
+    # Encourage a target swing height: penalize deviation from ``max_foot_height``
+    # weighted by the foot's horizontal speed (only matters while swinging).
+    feet_vel = data.sensordata[self._foot_linvel_sensor_adr]
+    vel_xy = feet_vel[..., :2]
+    vel_norm = jp.sqrt(jp.linalg.norm(vel_xy, axis=-1))
+    foot_pos = data.site_xpos[self._feet_site_id]
+    foot_z = foot_pos[..., -1]
+    delta = jp.abs(foot_z - self._config.reward_config.max_foot_height)
+    return jp.sum(delta * vel_norm)
 
   def _cost_torques(self, torques: jax.Array) -> jax.Array:
     return jp.sqrt(jp.sum(jp.square(torques))) + jp.sum(jp.abs(torques))
