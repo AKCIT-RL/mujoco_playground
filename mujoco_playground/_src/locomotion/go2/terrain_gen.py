@@ -78,17 +78,36 @@ def _edge_ramp(tile_px: int, res: float) -> np.ndarray:
   return np.clip(w, 0.0, 1.0).astype(np.float32)
 
 
+def _plateau_mask(tile_px: int, res: float) -> np.ndarray:
+  """Boolean mask (True) over the flat central spawn plateau of a tile.
+
+  Uses the same Chebyshev-distance plateau extent as :func:`_edge_ramp`, so the
+  masked region matches the flat core the robot spawns on.
+  """
+  half = 0.5 * tile_px * res
+  plateau = _PLATEAU_FRAC * half
+  coords = (np.arange(tile_px, dtype=np.float32) + 0.5) * res - half
+  d = np.maximum(np.abs(coords)[None, :], np.abs(coords)[:, None])
+  return d <= plateau
+
+
 def _tile_rough(
     tile_px: int, res: float, difficulty: float, rng: np.random.Generator
 ) -> np.ndarray:
   """Random bumps. Amplitude grows ~2cm -> ~10cm with difficulty.
 
-  Edges fade to 0 so the rough patch tiles seamlessly with its neighbours.
+  Edges fade to 0 so the rough patch tiles seamlessly with its neighbours, and
+  the central spawn plateau is flattened to height 0 so the robot always spawns
+  on level ground. Without this, the per-pixel noise under the plateau makes the
+  feet land on different heights at reset (the base wobbles / sinks) and, with
+  the feet-only collision model, lets the knees clip into the bumps.
   """
   amp = 0.02 + (0.10 - 0.02) * difficulty
   amp = min(amp, _MAX_TILE_HEIGHT)
   noise = rng.uniform(0.0, amp, size=(tile_px, tile_px)).astype(np.float32)
-  return noise * _edge_ramp(tile_px, res)
+  tile = noise * _edge_ramp(tile_px, res)
+  tile[_plateau_mask(tile_px, res)] = 0.0
+  return tile.astype(np.float32)
 
 
 def _tile_slope(

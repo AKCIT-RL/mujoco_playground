@@ -58,6 +58,16 @@ def default_config() -> config_dict.ConfigDict:
   # Hfield collisions need a larger contact/constraint budget than flat terrain.
   config.naconmax = 16 * 8192
   config.njmax = 80
+  # Reward reshaping to avoid the "freeze in place" local optimum on rough
+  # terrain. With the base joystick reward clipped to be non-negative, standing
+  # still at the default pose earns a guaranteed ~+pose reward with zero fall
+  # risk, so on risky terrain the agent prefers not to move (and then never
+  # promotes in the curriculum). We shrink the free "pose" reward, reward
+  # command tracking a bit more, and add an explicit penalty for the shortfall
+  # between the commanded and the actual planar speed.
+  config.reward_config.scales.pose = 0.1
+  config.reward_config.scales.tracking_lin_vel = 1.5
+  config.reward_config.scales.stand_still_moving = -0.5
   config.terrain = config_dict.create(
       num_rows=5,
       terrain_types=["rough", "slope", "stairs"],
@@ -197,6 +207,39 @@ class RoughCurriculum(go2_joystick.Joystick):
     dist = jp.linalg.norm(xy - state.info["spawn_xy"])
     state.info["max_progress"] = jp.maximum(state.info["max_progress"], dist)
     return state
+
+  # ----- reward ----------------------------------------------------------- #
+
+  def _get_reward(
+      self,
+      data: mjx.Data,
+      action: jax.Array,
+      info: Dict[str, Any],
+      metrics: Dict[str, Any],
+      done: jax.Array,
+      first_contact: jax.Array,
+      contact: jax.Array,
+  ) -> Dict[str, jax.Array]:
+    rewards = super()._get_reward(
+        data, action, info, metrics, done, first_contact, contact
+    )
+    rewards["stand_still_moving"] = self._cost_stand_still_moving(
+        info["command"], self.get_global_linvel(data)
+    )
+    return rewards
+
+  def _cost_stand_still_moving(
+      self, commands: jax.Array, global_linvel: jax.Array
+  ) -> jax.Array:
+    """Penalizes the shortfall between commanded and actual planar speed.
+
+    Only active when a non-trivial command is issued, so it does not fight the
+    ``stand_still`` reward that keeps the robot still on a zero command. This
+    directly discourages the "freeze in place" strategy on risky terrain.
+    """
+    cmd_norm = jp.linalg.norm(commands)
+    speed = jp.linalg.norm(global_linvel[:2])
+    return jp.clip(cmd_norm - speed, 0.0, None) * (cmd_norm > 0.1)
 
   # ----- curriculum logic ------------------------------------------------- #
 
