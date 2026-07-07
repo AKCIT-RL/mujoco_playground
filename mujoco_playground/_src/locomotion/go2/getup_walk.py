@@ -84,6 +84,7 @@ def default_config() -> config_dict.ConfigDict:
       reward_config=config_dict.create(
           tracking_sigma=0.25,
           max_foot_height=0.1,
+          max_air_time=0.5,
           scales=config_dict.create(
               # Recovery (phase 1).
               orientation=1.0,
@@ -99,10 +100,13 @@ def default_config() -> config_dict.ConfigDict:
               # Settle: hold position once inside the goal acceptance radius.
               settle=3.0,
               # Gait quality (phase 2).
-              feet_air_time=0.1,
+              feet_air_time=0.2,
               feet_slip=-0.1,
               feet_clearance=-2.0,
               feet_height=-0.2,
+              # Force all four legs to participate: penalize a foot that stays
+              # airborne much longer than a normal swing (3-legged gait).
+              feet_stuck=-1.0,
               # Base stabilization (only while standing, to keep the get-up
               # phase free to move fast).
               lin_vel_z=-0.5,
@@ -468,6 +472,8 @@ class GetupWalk(go2_base.Go2Env):
             info["swing_peak"], first_contact
         )
         * move_active,
+        "feet_stuck": self._cost_feet_stuck(info["feet_air_time"], contact)
+        * move_active,
         "lin_vel_z": self._cost_lin_vel_z(self.get_global_linvel(data)) * stood,
         "ang_vel_xy": self._cost_ang_vel_xy(self.get_global_angvel(data))
         * stood,
@@ -571,6 +577,17 @@ class GetupWalk(go2_base.Go2Env):
     # scored at touch-down (first_contact).
     error = swing_peak / self._config.reward_config.max_foot_height - 1.0
     return jp.sum(jp.square(error) * first_contact)
+
+  def _cost_feet_stuck(
+      self, air_time: jax.Array, contact: jax.Array
+  ) -> jax.Array:
+    # Penalize any foot that stays in the air well beyond a normal swing. A
+    # 3-legged gait keeps one foot permanently airborne, so its air time grows
+    # unbounded; this term forces that leg back down to participate in the gait.
+    over = jp.clip(
+        air_time - self._config.reward_config.max_air_time, 0.0, None
+    )
+    return jp.sum(over * ~contact)
 
   def _cost_lin_vel_z(self, global_linvel: jax.Array) -> jax.Array:
     # Penalize vertical bobbing of the base.
