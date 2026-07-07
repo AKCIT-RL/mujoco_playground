@@ -102,6 +102,12 @@ def default_config() -> config_dict.ConfigDict:
               feet_air_time=0.1,
               feet_slip=-0.1,
               feet_clearance=-2.0,
+              feet_height=-0.2,
+              # Base stabilization (only while standing, to keep the get-up
+              # phase free to move fast).
+              lin_vel_z=-0.5,
+              ang_vel_xy=-0.05,
+              energy=-0.001,
               # Regularization (both phases).
               action_rate=-0.001,
               dof_pos_limits=-0.1,
@@ -228,6 +234,7 @@ class GetupWalk(go2_base.Go2Env):
         "goal": goal,
         "feet_air_time": jp.zeros(4),
         "last_contact": jp.zeros(4, dtype=bool),
+        "swing_peak": jp.zeros(4),
     }
 
     metrics = {
@@ -256,6 +263,8 @@ class GetupWalk(go2_base.Go2Env):
     contact_filt = contact | state.info["last_contact"]
     first_contact = (state.info["feet_air_time"] > 0.0) * contact_filt
     state.info["feet_air_time"] += self.dt
+    p_fz = data.site_xpos[self._feet_site_id][..., -1]
+    state.info["swing_peak"] = jp.maximum(state.info["swing_peak"], p_fz)
 
     obs = self._get_obs(data, state.info)
     done = self._get_termination(data)
@@ -299,6 +308,7 @@ class GetupWalk(go2_base.Go2Env):
     state.info["arrived"] = arrived
     state.info["feet_air_time"] *= ~contact
     state.info["last_contact"] = contact
+    state.info["swing_peak"] *= ~contact
     for k, v in rewards.items():
       state.metrics[f"reward/{k}"] = v
     state.metrics["stood"] = stood
@@ -454,6 +464,14 @@ class GetupWalk(go2_base.Go2Env):
         * move_active,
         "feet_slip": self._cost_feet_slip(data, contact) * move_active,
         "feet_clearance": self._cost_feet_clearance(data),
+        "feet_height": self._cost_feet_height(
+            info["swing_peak"], first_contact
+        )
+        * move_active,
+        "lin_vel_z": self._cost_lin_vel_z(self.get_global_linvel(data)) * stood,
+        "ang_vel_xy": self._cost_ang_vel_xy(self.get_global_angvel(data))
+        * stood,
+        "energy": self._cost_energy(data.qvel[6:], data.actuator_force) * stood,
         "action_rate": self._cost_action_rate(action, info),
         "dof_pos_limits": self._cost_joint_pos_limits(data.qpos[7:]),
         "torques": self._cost_torques(joint_torques),
@@ -545,6 +563,26 @@ class GetupWalk(go2_base.Go2Env):
     foot_z = foot_pos[..., -1]
     delta = jp.abs(foot_z - self._config.reward_config.max_foot_height)
     return jp.sum(delta * vel_norm)
+
+  def _cost_feet_height(
+      self, swing_peak: jax.Array, first_contact: jax.Array
+  ) -> jax.Array:
+    # Penalize the per-step swing peak deviating from the target foot height,
+    # scored at touch-down (first_contact).
+    error = swing_peak / self._config.reward_config.max_foot_height - 1.0
+    return jp.sum(jp.square(error) * first_contact)
+
+  def _cost_lin_vel_z(self, global_linvel: jax.Array) -> jax.Array:
+    # Penalize vertical bobbing of the base.
+    return jp.square(global_linvel[2])
+
+  def _cost_ang_vel_xy(self, global_angvel: jax.Array) -> jax.Array:
+    # Penalize roll/pitch angular velocity of the base (wobbling).
+    return jp.sum(jp.square(global_angvel[:2]))
+
+  def _cost_energy(self, qvel: jax.Array, qfrc: jax.Array) -> jax.Array:
+    # Penalize mechanical power (efficiency).
+    return jp.sum(jp.abs(qvel) * jp.abs(qfrc))
 
   def _cost_torques(self, torques: jax.Array) -> jax.Array:
     return jp.sqrt(jp.sum(jp.square(torques))) + jp.sum(jp.abs(torques))
