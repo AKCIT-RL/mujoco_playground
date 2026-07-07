@@ -63,9 +63,9 @@ def default_config() -> config_dict.ConfigDict:
       reward_config=config_dict.create(
           scales=config_dict.create(
               orientation=1.0,
-              torso_height=2.0,
+              torso_height=1.0,
               posture=2.0,
-              standing=1.0,
+              standing=3.0,
               stand_still=1.0,
               action_rate=-0.001,
               dof_pos_limits=-0.1,
@@ -361,14 +361,15 @@ class Getup(h1_base.H1Env):
     return jp.exp(-2.0 * error)
 
   def _reward_height(self, torso_height: jax.Array) -> jax.Array:
-    # Squared height fraction in [0, 1]. Being convex in the height, it pays
-    # partial ("sitting") heights quadratically less than the flat
-    # ``exp(height) - 1`` did (which saturated and handed out ~half of the
-    # maximum just for sitting), so standing up all the way is clearly the best
-    # option while a smooth climbing gradient is kept from the fallen pose.
+    # ``exp(height) - 1`` gives a strong, non-saturating gradient all the way
+    # from the fallen pose up to the standing height, which is what pulls the
+    # robot off the floor. (A convex ``(h/z_des)**2`` reward was tried but its
+    # gradient vanishes near the ground, so the agent had no incentive to start
+    # getting up and just laid flat.) Over-rewarding partial height would bring
+    # back the "sit" exploit, so this term is kept at unit weight and the true
+    # incentive to stand comes from the (large) ``standing`` bonus.
     height = jp.min(jp.array([torso_height, self._z_des]))
-    height_frac = height / self._z_des
-    return jp.square(height_frac)
+    return jp.exp(height) - 1.0
 
   def _reward_posture(
       self, joint_angles: jax.Array, gravity: jax.Array

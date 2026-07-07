@@ -59,15 +59,17 @@ def default_config() -> config_dict.ConfigDict:
   config.naconmax = 16 * 8192
   config.njmax = 80
   # Reward reshaping to avoid the "freeze in place" local optimum on rough
-  # terrain. With the base joystick reward clipped to be non-negative, standing
-  # still at the default pose earns a guaranteed ~+pose reward with zero fall
-  # risk, so on risky terrain the agent prefers not to move (and then never
-  # promotes in the curriculum). We shrink the free "pose" reward, reward
-  # command tracking a bit more, and add an explicit penalty for the shortfall
-  # between the commanded and the actual planar speed.
+  # terrain. The base joystick reward is clipped to be non-negative
+  # (`clip(sum, 0, inf)`), so any *negative* penalty for standing is simply
+  # clipped away: the reward becomes a flat 0 with zero gradient and PPO cannot
+  # escape the standing basin. Instead we (a) shrink the free "pose" reward that
+  # makes standing attractive, (b) boost velocity tracking, and (c) add a
+  # *positive* dense progress reward for moving along the commanded direction.
+  # Keeping these terms positive means standing sits just above the clip floor
+  # while moving pays strictly more, preserving a gradient toward locomotion.
   config.reward_config.scales.pose = 0.1
   config.reward_config.scales.tracking_lin_vel = 1.5
-  config.reward_config.scales.stand_still_moving = -0.5
+  config.reward_config.scales.progress = 1.0
   config.terrain = config_dict.create(
       num_rows=5,
       terrain_types=["rough", "slope", "stairs"],
@@ -223,23 +225,28 @@ class RoughCurriculum(go2_joystick.Joystick):
     rewards = super()._get_reward(
         data, action, info, metrics, done, first_contact, contact
     )
-    rewards["stand_still_moving"] = self._cost_stand_still_moving(
-        info["command"], self.get_global_linvel(data)
+    rewards["progress"] = self._reward_progress(
+        info["command"], self.get_local_linvel(data)
     )
     return rewards
 
-  def _cost_stand_still_moving(
-      self, commands: jax.Array, global_linvel: jax.Array
+  def _reward_progress(
+      self, commands: jax.Array, local_vel: jax.Array
   ) -> jax.Array:
-    """Penalizes the shortfall between commanded and actual planar speed.
+    """Positive dense reward for moving along the commanded planar direction.
 
-    Only active when a non-trivial command is issued, so it does not fight the
-    ``stand_still`` reward that keeps the robot still on a zero command. This
-    directly discourages the "freeze in place" strategy on risky terrain.
+    The body-frame velocity is projected onto the (unit) command direction and
+    clipped to ``[0, |cmd|]`` so it rewards progress toward the goal without
+    paying for overshoot or backward motion. Being strictly non-negative, it
+    keeps the (clipped) total reward above the floor and gives PPO a smooth
+    gradient out of the standing basin. Only active on a non-trivial command,
+    so it does not fight the zero-command ``stand_still`` behavior.
     """
-    cmd_norm = jp.linalg.norm(commands)
-    speed = jp.linalg.norm(global_linvel[:2])
-    return jp.clip(cmd_norm - speed, 0.0, None) * (cmd_norm > 0.1)
+    cmd_xy = commands[:2]
+    cmd_norm = jp.linalg.norm(cmd_xy)
+    direction = cmd_xy / (cmd_norm + 1e-6)
+    proj = jp.dot(local_vel[:2], direction)
+    return jp.clip(proj, 0.0, cmd_norm) * (cmd_norm > 0.1)
 
   # ----- curriculum logic ------------------------------------------------- #
 

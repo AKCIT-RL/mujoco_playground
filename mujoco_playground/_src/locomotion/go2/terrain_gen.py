@@ -102,7 +102,7 @@ def _tile_rough(
   feet land on different heights at reset (the base wobbles / sinks) and, with
   the feet-only collision model, lets the knees clip into the bumps.
   """
-  amp = 0.02 + (0.10 - 0.02) * difficulty
+  amp = 0.10 * difficulty
   amp = min(amp, _MAX_TILE_HEIGHT)
   noise = rng.uniform(0.0, amp, size=(tile_px, tile_px)).astype(np.float32)
   tile = noise * _edge_ramp(tile_px, res)
@@ -115,11 +115,12 @@ def _tile_slope(
 ) -> np.ndarray:
   """Raised flat-topped mesa with linear slopes down to every edge.
 
-  The robot spawns on the central plateau and walks down a slope (~5deg ->
-  ~20deg) to the seam, where the height returns to 0 so tiles connect.
+  The robot spawns on the central plateau and walks down a slope (flat at
+  difficulty 0 up to ~20deg) to the seam, where the height returns to 0 so tiles
+  connect.
   """
   del rng
-  peak = 0.05 + (_MAX_TILE_HEIGHT - 0.05) * difficulty
+  peak = _MAX_TILE_HEIGHT * difficulty
   return peak * _edge_ramp(tile_px, res)
 
 
@@ -128,11 +129,13 @@ def _tile_stairs(
 ) -> np.ndarray:
   """Stepped pyramid: stairs ascend from every edge up to a central plateau.
 
-  Step height grows ~3cm -> ~10cm with difficulty; the outermost ring stays at
-  height 0 so neighbouring tiles connect without a cliff.
+  Step height grows from flat (difficulty 0) to ~10cm; the outermost ring stays
+  at height 0 so neighbouring tiles connect without a cliff.
   """
   del rng
-  step_h = 0.03 + (0.10 - 0.03) * difficulty
+  step_h = 0.10 * difficulty
+  if step_h <= 1e-4:
+    return np.zeros((tile_px, tile_px), dtype=np.float32)
   ramp = _edge_ramp(tile_px, res)
   peak = min(_MAX_TILE_HEIGHT, step_h * 6.0)
   # Quantize the smooth ramp into discrete steps of height ``step_h``.
