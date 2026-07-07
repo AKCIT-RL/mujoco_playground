@@ -58,6 +58,10 @@ def default_config() -> config_dict.ConfigDict:
   # Hfield collisions need a larger contact/constraint budget than flat terrain.
   config.naconmax = 16 * 8192
   config.njmax = 80
+  # Heightfield vs. foot collisions go through the CCD path, whose contact
+  # buffer (naccdmax) defaults to auto-sizing for flat terrain and overflows on
+  # rough terrain. Give it an explicit, generous budget to avoid CCD overflow.
+  config.naccdmax = 16 * 8192
   # Reward reshaping to avoid the "freeze in place" local optimum on rough
   # terrain. The base joystick reward is clipped to be non-negative
   # (`clip(sum, 0, inf)`), so any *negative* penalty for standing is simply

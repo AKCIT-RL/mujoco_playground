@@ -95,6 +95,10 @@ def default_config() -> config_dict.ConfigDict:
       # go1-inherited 4*8192 was below 4*16384=65536 and overflowed at 16384 envs.
       naconmax=10 * 8192,
       njmax=40,
+      # naccdmax is the global CCD (convex collision) contact buffer. Left as a
+      # placeholder (None) so the warp backend auto-sizes it for flat terrain;
+      # rough-terrain tasks (heightfield) override it with an explicit budget.
+      naccdmax=config_dict.placeholder(int),
   )
 
 
@@ -178,6 +182,7 @@ class Joystick(go2_base.Go2Env):
         impl=self.mjx_model.impl.value,
         naconmax=self._config.naconmax,
         njmax=self._config.njmax,
+        naccdmax=self._config.naccdmax,
     )
     data = mjx.forward(self.mjx_model, data)
 
