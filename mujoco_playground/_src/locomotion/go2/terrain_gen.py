@@ -268,6 +268,15 @@ def build_scene_xml(
   <worldbody>
     <geom name="floor" type="hfield" hfield="terrain" material="groundplane" contype="1" conaffinity="0" priority="1"
       friction="1.0"/>
+    <!-- Infinite flat safety ground 2cm below the hfield's zero level. The
+         hfield perimeter fades to height 0, so a robot that walks past the
+         finite heightfield steps onto this plane instead of falling into the
+         void. The small negative offset avoids double contacts on the flat
+         (height-0) tiles. It is intentionally NOT named "floor", so the
+         per-foot "*_floor_found" contact sensors keep tracking only the
+         heightfield terrain. -->
+    <geom name="safety_floor" type="plane" pos="0 0 -0.02" size="0 0 0.05"
+      material="groundplane" contype="1" conaffinity="0" friction="1.0"/>
   </worldbody>
 
   <include file="sensor_feet.xml"/>

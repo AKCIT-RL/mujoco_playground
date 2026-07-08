@@ -77,7 +77,7 @@ def default_config() -> config_dict.ConfigDict:
   config.terrain = config_dict.create(
       num_rows=5,
       terrain_types=["rough", "slope", "stairs"],
-      tile_size=8.0,
+      tile_size=12.0,
       resolution=0.1,
       difficulty_range=[0.0, 1.0],
       seed=0,
@@ -87,6 +87,10 @@ def default_config() -> config_dict.ConfigDict:
       promote_distance=3.0,
       # If the agent falls before travelling this far (m), it is regressed.
       regress_distance=0.5,
+      # Within this distance (m) of the world boundary, the joystick command is
+      # smoothly steered back toward the world center so the robot does not
+      # keep walking off the finite terrain (0 disables the bias).
+      command_bias_margin=3.0,
   )
   return config
 
@@ -157,6 +161,13 @@ class RoughCurriculum(go2_joystick.Joystick):
     self._num_cols = len(terr["terrain_types"])
     self._promote_distance = float(self._config.curriculum.promote_distance)
     self._regress_distance = float(self._config.curriculum.regress_distance)
+    # World half-extents (m) and the boundary band where the command is steered
+    # back toward the center to keep the robot on the finite terrain.
+    self._radius_x = float(terr["radius_x"])
+    self._radius_y = float(terr["radius_y"])
+    self._command_bias_margin = float(
+        self._config.curriculum.command_bias_margin
+    )
 
   # ----- accessors -------------------------------------------------------- #
 
@@ -212,7 +223,39 @@ class RoughCurriculum(go2_joystick.Joystick):
     xy = state.data.qpos[0:2]
     dist = jp.linalg.norm(xy - state.info["spawn_xy"])
     state.info["max_progress"] = jp.maximum(state.info["max_progress"], dist)
+    # Steer the command back toward the world center near the boundary so the
+    # robot does not keep walking off the finite terrain.
+    state.info["command"] = self._bias_command_inward(
+        state.data, state.info["command"]
+    )
     return state
+
+  def _bias_command_inward(
+      self, data: mjx.Data, command: jax.Array
+  ) -> jax.Array:
+    """Blends the planar command toward the world center near the boundary.
+
+    The blend weight ramps from 0 (farther than ``command_bias_margin`` from
+    every boundary) to 1 (at the boundary). The inward world direction is
+    expressed in the body/command frame (same frame as ``local_linvel``, mirror
+    of :meth:`get_gravity`) so it can be mixed with the sampled command while
+    preserving its planar speed. The yaw command is left untouched.
+    """
+    if self._command_bias_margin <= 0.0:
+      return command
+    pos = data.qpos[0:2]
+    margin = jp.array([self._radius_x, self._radius_y]) - jp.abs(pos)
+    m = jp.min(margin)
+    w = jp.clip(
+        (self._command_bias_margin - m) / self._command_bias_margin, 0.0, 1.0
+    )
+    to_center = jp.array([-pos[0], -pos[1], 0.0])
+    world_dir = to_center / (jp.linalg.norm(to_center) + 1e-6)
+    body_dir = data.site_xmat[self._imu_site_id].T @ world_dir
+    speed = jp.linalg.norm(command[:2])
+    inward_xy = body_dir[:2] * speed
+    new_xy = (1.0 - w) * command[:2] + w * inward_xy
+    return command.at[:2].set(new_xy)
 
   # ----- reward ----------------------------------------------------------- #
 
