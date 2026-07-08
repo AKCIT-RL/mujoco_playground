@@ -461,7 +461,8 @@ class GetupWalk(go2_base.Go2Env):
         "progress": jp.clip(jp.dot(local_vel[:2], goal_dir), 0.0, None)
         * move_active,
         "arrival": newly_arrived.astype(jp.float32),
-        "settle": self._reward_settle(local_vel) * settle_active,
+        "settle": self._reward_settle(local_vel, gravity, torso_height)
+        * settle_active,
         "feet_air_time": self._reward_feet_air_time(
             info["feet_air_time"], first_contact
         )
@@ -536,14 +537,24 @@ class GetupWalk(go2_base.Go2Env):
     weight = jp.array([1.0, 1.0, 0.1] * 4)
     return jp.exp(-jp.sum(jp.square(qpos - self._default_pose) * weight))
 
-  def _reward_settle(self, local_vel: jax.Array) -> jax.Array:
-    # Reward near-zero horizontal velocity so that, once inside the goal
-    # acceptance radius, the robot holds its position instead of oscillating
-    # ("dancing") back and forth around the target.
-    return jp.exp(
+  def _reward_settle(
+      self,
+      local_vel: jax.Array,
+      gravity: jax.Array,
+      torso_height: jax.Array,
+  ) -> jax.Array:
+    # Reward *holding* at the goal: near-zero horizontal velocity AND standing
+    # upright at the desired height. Without the upright/height factors the
+    # robot could maximize "settle" simply by stopping face-down on the ground;
+    # multiplying the three factors means it must arrive, stop, and stay on its
+    # feet to be rewarded.
+    still = jp.exp(
         -jp.sum(jp.square(local_vel[:2]))
         / self._config.reward_config.tracking_sigma
     )
+    upright = self._reward_orientation(gravity)
+    height = jp.clip(torso_height / self._z_des, 0.0, 1.0)
+    return still * upright * height
 
   def _reward_feet_air_time(
       self, air_time: jax.Array, first_contact: jax.Array
