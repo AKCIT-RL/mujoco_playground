@@ -51,7 +51,9 @@ def _difficulty_for_row(
 _PLATEAU_FRAC = 0.35
 # Fraction of the tile (half-extent) kept flat at height 0 along every border so
 # that neighbouring tiles connect seamlessly (no vertical cliffs at the seams).
-_BORDER_FRAC = 0.1
+# This also forms the flat buffer corridor between the relief of adjacent tiles,
+# where the command bias turns the robot around before it reaches a neighbour.
+_BORDER_FRAC = 0.15
 # Hard cap on tile elevation (meters). Keeps the heightfield gentle enough for
 # the feet-only Go2 collision model (steep multi-meter features make the small
 # foot geoms tunnel through the hfield prisms).

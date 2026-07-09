@@ -87,10 +87,12 @@ def default_config() -> config_dict.ConfigDict:
       promote_distance=3.0,
       # If the agent falls before travelling this far (m), it is regressed.
       regress_distance=0.5,
-      # Within this distance (m) of the world boundary, the joystick command is
-      # smoothly steered back toward the world center so the robot does not
-      # keep walking off the finite terrain (0 disables the bias).
-      command_bias_margin=3.0,
+      # Width (m) of the border band inside which the command is steered back
+      # toward the spawn tile center. Chosen to coincide with the flat height-0
+      # seam corridor between tiles, so the robot can freely explore the whole
+      # relief of its tile and only turns around on the flat buffer (never
+      # reaching the neighbour's relief). 0 disables the bias.
+      command_bias_margin=1.0,
   )
   return config
 
@@ -161,10 +163,10 @@ class RoughCurriculum(go2_joystick.Joystick):
     self._num_cols = len(terr["terrain_types"])
     self._promote_distance = float(self._config.curriculum.promote_distance)
     self._regress_distance = float(self._config.curriculum.regress_distance)
-    # World half-extents (m) and the boundary band where the command is steered
-    # back toward the center to keep the robot on the finite terrain.
-    self._radius_x = float(terr["radius_x"])
-    self._radius_y = float(terr["radius_y"])
+    # Tile size (m) and the border band inside which the command is steered back
+    # toward the spawn tile center, so the robot keeps experiencing its assigned
+    # difficulty instead of wandering off into neighbouring tiles.
+    self._tile_size = float(self._config.terrain.tile_size)
     self._command_bias_margin = float(
         self._config.curriculum.command_bias_margin
     )
@@ -223,38 +225,42 @@ class RoughCurriculum(go2_joystick.Joystick):
     xy = state.data.qpos[0:2]
     dist = jp.linalg.norm(xy - state.info["spawn_xy"])
     state.info["max_progress"] = jp.maximum(state.info["max_progress"], dist)
-    # Steer the command back toward the world center near the boundary so the
-    # robot does not keep walking off the finite terrain.
-    state.info["command"] = self._bias_command_inward(
-        state.data, state.info["command"]
+    # Steer the command back toward the spawn tile center near the tile border,
+    # so the robot keeps experiencing its assigned difficulty level instead of
+    # walking off into neighbouring tiles (and off the finite terrain).
+    state.info["command"] = self._bias_command_toward_tile(
+        state.data, state.info["command"], state.info["spawn_xy"]
     )
     return state
 
-  def _bias_command_inward(
-      self, data: mjx.Data, command: jax.Array
+  def _bias_command_toward_tile(
+      self, data: mjx.Data, command: jax.Array, spawn_xy: jax.Array
   ) -> jax.Array:
-    """Blends the planar command toward the world center near the boundary.
+    """Blends the planar command toward the spawn tile center near the border.
 
     The blend weight ramps from 0 (farther than ``command_bias_margin`` from
-    every boundary) to 1 (at the boundary). The inward world direction is
-    expressed in the body/command frame (same frame as ``local_linvel``, mirror
-    of :meth:`get_gravity`) so it can be mixed with the sampled command while
-    preserving its planar speed. The yaw command is left untouched.
+    every tile edge) to 1 (at the edge). The direction back to the tile center
+    is expressed in the body/command frame (same frame as ``local_linvel``,
+    mirror of :meth:`get_gravity`) so it can be mixed with the sampled command
+    while preserving its planar speed. The yaw command is left untouched.
     """
     if self._command_bias_margin <= 0.0:
       return command
-    pos = data.qpos[0:2]
-    margin = jp.array([self._radius_x, self._radius_y]) - jp.abs(pos)
-    m = jp.min(margin)
+    offset = data.qpos[0:2] - spawn_xy  # displacement from the tile center
+    dist_to_border = 0.5 * self._tile_size - jp.abs(offset)  # per-axis (m)
+    m = jp.min(dist_to_border)
     w = jp.clip(
         (self._command_bias_margin - m) / self._command_bias_margin, 0.0, 1.0
     )
-    to_center = jp.array([-pos[0], -pos[1], 0.0])
+    to_center = jp.array([-offset[0], -offset[1], 0.0])
     world_dir = to_center / (jp.linalg.norm(to_center) + 1e-6)
     body_dir = data.site_xmat[self._imu_site_id].T @ world_dir
     speed = jp.linalg.norm(command[:2])
     inward_xy = body_dir[:2] * speed
     new_xy = (1.0 - w) * command[:2] + w * inward_xy
+    # Damp the command magnitude as we approach the seam (w -> 1) so the robot
+    # decelerates into the turnaround and overshoots the flat buffer less.
+    new_xy = new_xy * (1.0 - 0.5 * w)
     return command.at[:2].set(new_xy)
 
   # ----- reward ----------------------------------------------------------- #
