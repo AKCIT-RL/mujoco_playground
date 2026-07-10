@@ -127,11 +127,15 @@ class Getup(h1_base.H1Env):
     # Upright = body z-axis aligned with world z-axis (upvector sensor ~ +z).
     self._up_vec = jp.array([0.0, 0.0, 1.0])
 
-    # Desired standing IMU height read from the home keyframe.
-    d = mujoco.MjData(self._mj_model)
-    d.qpos[:] = np.array(self._mj_model.keyframe("home").qpos)
-    mujoco.mj_forward(self._mj_model, d)
-    self._z_des = float(d.site_xpos[self._imu_site_id][2])
+    # Desired standing height of the PELVIS (root/free-joint body), read from
+    # the home keyframe. The reward keys height off the pelvis rather than the
+    # torso IMU site because the IMU sits high on the upper torso: a robot that
+    # merely sits upright still raises the IMU to ~68% of standing, so it keeps
+    # collecting most of the height reward for free -> a wide, comfortable
+    # "sit" basin that most seeds fall into. The pelvis instead drops to ~15%
+    # of standing when seated, so only genuinely standing on the feet earns the
+    # height reward.
+    self._z_des = float(self._mj_model.keyframe("home").qpos[2])
 
   def _get_random_qpos(self, rng: jax.Array) -> jax.Array:
     """Initial fallen configuration: 0.5m drop, random orientation/joints."""
@@ -298,13 +302,13 @@ class Getup(h1_base.H1Env):
       action: jax.Array,
       info: dict[str, Any],
   ) -> dict[str, jax.Array]:
-    torso_height = data.site_xpos[self._imu_site_id][2]
+    root_height = data.qpos[2]  # Pelvis (root) height.
     joint_angles = data.qpos[7:]
     joint_torques = data.actuator_force
 
     gravity = self.get_gravity(data)
     is_upright = self._is_upright(gravity)
-    is_at_desired_height = self._is_at_desired_height(torso_height)
+    is_at_desired_height = self._is_at_desired_height(root_height)
     # The legs must actually be in the standing configuration (not lying flat /
     # "sitting") before the standing bonus is granted. Without this the robot
     # can game the height/orientation rewards by jackknifing at the hips while
@@ -312,18 +316,19 @@ class Getup(h1_base.H1Env):
     is_good_posture = self._is_good_posture(joint_angles)
     gate = is_upright * is_at_desired_height * is_good_posture
 
-    # Fraction of the standing height (0 on the ground, 1 when fully stood up).
-    # It gates the orientation reward so that keeping the torso vertical only
-    # pays off while the robot is actually tall. Otherwise the agent settles
-    # into a stable "sit": a vertical torso close to the floor collects the
-    # full orientation reward for free, which is a strong local optimum for a
-    # biped. Coupling the two removes that free lunch while preserving a
-    # monotonic sit -> stand gradient (both factors grow as the robot rises).
-    height_frac = jp.clip(torso_height / self._z_des, 0.0, 1.0)
+    # Fraction of the standing pelvis height (0 on the ground, 1 when fully
+    # stood up). It gates the orientation reward so that keeping the torso
+    # vertical only pays off while the robot is actually standing. Otherwise the
+    # agent settles into a stable "sit": a vertical torso with the pelvis on the
+    # floor would otherwise collect the orientation reward for free, which is a
+    # strong local optimum for a biped. Coupling the two removes that free lunch
+    # while preserving a monotonic sit -> stand gradient (both factors grow as
+    # the pelvis rises).
+    height_frac = jp.clip(root_height / self._z_des, 0.0, 1.0)
 
     return {
         "orientation": height_frac * self._reward_orientation(gravity),
-        "torso_height": self._reward_height(torso_height),
+        "torso_height": self._reward_height(root_height),
         # Posture is rewarded continuously (not hard-gated) but scaled by how
         # upright the robot is, so matching the default pose only pays off while
         # standing up. This removes both the "sit" exploit (legs flat while the
@@ -343,9 +348,9 @@ class Getup(h1_base.H1Env):
     return ori_error < ori_tol
 
   def _is_at_desired_height(
-      self, torso_height: jax.Array, pos_tol: float = 0.1
+      self, root_height: jax.Array, pos_tol: float = 0.1
   ) -> jax.Array:
-    height = jp.min(jp.array([torso_height, self._z_des]))
+    height = jp.min(jp.array([root_height, self._z_des]))
     height_error = self._z_des - height
     return height_error < pos_tol
 
@@ -360,7 +365,7 @@ class Getup(h1_base.H1Env):
     error = jp.sum(jp.square(self._up_vec - up_vec))
     return jp.exp(-2.0 * error)
 
-  def _reward_height(self, torso_height: jax.Array) -> jax.Array:
+  def _reward_height(self, root_height: jax.Array) -> jax.Array:
     # ``exp(height) - 1`` gives a strong, non-saturating gradient all the way
     # from the fallen pose up to the standing height, which is what pulls the
     # robot off the floor. (A convex ``(h/z_des)**2`` reward was tried but its
@@ -368,7 +373,7 @@ class Getup(h1_base.H1Env):
     # getting up and just laid flat.) Over-rewarding partial height would bring
     # back the "sit" exploit, so this term is kept at unit weight and the true
     # incentive to stand comes from the (large) ``standing`` bonus.
-    height = jp.min(jp.array([torso_height, self._z_des]))
+    height = jp.min(jp.array([root_height, self._z_des]))
     return jp.exp(height) - 1.0
 
   def _reward_posture(
