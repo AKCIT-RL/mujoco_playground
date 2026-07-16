@@ -63,7 +63,7 @@ def default_config() -> config_dict.ConfigDict:
       reward_config=config_dict.create(
           scales=config_dict.create(
               orientation=1.0,
-              torso_height=1.0,
+              torso_height=2.0,
               posture=2.0,
               standing=3.0,
               stand_still=1.0,
@@ -374,15 +374,17 @@ class Getup(h1_base.H1Env):
     return jp.exp(-2.0 * error)
 
   def _reward_height(self, root_height: jax.Array) -> jax.Array:
-    # ``exp(height) - 1`` gives a strong, non-saturating gradient all the way
-    # from the fallen pose up to the standing height, which is what pulls the
-    # robot off the floor. (A convex ``(h/z_des)**2`` reward was tried but its
-    # gradient vanishes near the ground, so the agent had no incentive to start
-    # getting up and just laid flat.) Over-rewarding partial height would bring
-    # back the "sit" exploit, so this term is kept at unit weight and the true
-    # incentive to stand comes from the (large) ``standing`` bonus.
-    height = jp.min(jp.array([root_height, self._z_des]))
-    return jp.exp(height) - 1.0
+    # Concave reward in the pelvis-height fraction: ``frac * (2 - frac)`` with
+    # ``frac = h / z_des`` clipped to [0, 1]. Its gradient is largest near the
+    # ground (~2 at frac=0) and vanishes at standing height, so it pulls the
+    # robot strongly OFF THE FLOOR. This fixes the "lie still" trap that a flat
+    # ``exp(height) - 1`` reward (whose gradient is weakest at the ground) left:
+    # there, clumsy get-up attempts barely out-earn lying motionless once the
+    # small movement costs are clipped away. Because it keys off the pelvis
+    # (which only rises by actually standing on the feet), rewarding partial
+    # height cannot be gamed by sitting.
+    frac = jp.clip(root_height / self._z_des, 0.0, 1.0)
+    return frac * (2.0 - frac)
 
   def _reward_posture(
       self, joint_angles: jax.Array, gravity: jax.Array
