@@ -67,6 +67,7 @@ def default_config() -> config_dict.ConfigDict:
               posture=2.0,
               standing=3.0,
               stand_still=1.0,
+              stationary=2.0,
               action_rate=-0.001,
               dof_pos_limits=-0.1,
               torques=-1e-5,
@@ -336,6 +337,13 @@ class Getup(h1_base.H1Env):
         "posture": self._reward_posture(joint_angles, gravity),
         "standing": gate.astype(jp.float32),
         "stand_still": self._reward_stand_still(action, gate),
+        # Once the robot is fully stood up (same gate as ``standing``), reward
+        # holding the pose motionless. ``stand_still`` only asks for zero action
+        # while this asks for zero body velocity, so a wobbling stance that is
+        # about to topple pays much less than a settled, balanced one. This is
+        # what stops the "stand up with crooked legs -> fall -> stand up again"
+        # cycle by making a stable stance strictly more rewarding.
+        "stationary": self._reward_stationary(data, gate),
         "action_rate": self._cost_action_rate(action, info),
         "dof_pos_limits": self._cost_joint_pos_limits(data.qpos[7:]),
         "torques": self._cost_torques(joint_torques),
@@ -389,6 +397,14 @@ class Getup(h1_base.H1Env):
     cost = jp.sum(jp.square(act))
     rew = jp.exp(-0.5 * cost)
     return gate * rew
+
+  def _reward_stationary(self, data: mjx.Data, gate: jax.Array) -> jax.Array:
+    # Penalize base motion (linear + angular velocity) once standing so the
+    # robot settles and balances in place instead of swaying until it falls.
+    linvel = self.get_local_linvel(data)
+    angvel = self.get_global_angvel(data)
+    vel_cost = jp.sum(jp.square(linvel)) + jp.sum(jp.square(angvel))
+    return gate * jp.exp(-vel_cost)
 
   def _cost_torques(self, torques: jax.Array) -> jax.Array:
     return jp.sqrt(jp.sum(jp.square(torques))) + jp.sum(jp.abs(torques))
