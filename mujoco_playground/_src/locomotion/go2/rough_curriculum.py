@@ -55,6 +55,11 @@ from mujoco_playground._src.wrapper import Wrapper
 def default_config() -> config_dict.ConfigDict:
   """Joystick config extended with terrain-grid and curriculum settings."""
   config = go2_joystick.default_config()
+  # Use the JAX/MJX collision backend instead of the warp default: on the
+  # procedural heightfield the warp CCD path is unreliable (its contact buffer
+  # either OOMs the GPU or silently drops contacts), whereas MJX uses fixed
+  # compile-time contact buffers with valid physics and runs faster here.
+  config.impl = "jax"
   # Hfield collisions need a larger contact/constraint budget than flat terrain.
   config.naconmax = 16 * 8192
   config.njmax = 80
